@@ -1,7 +1,8 @@
-```markdown
 # Quantum Approximate Optimization Algorithm (QAOA)
 
 This repository contains a Python implementation of the Quantum Approximate Optimization Algorithm (QAOA) for solving various optimization problems. It includes functions to construct Ising Hamiltonians, k-SAT Hamiltonians, and solve the Max Cut problem. The QAOA logic can be used to find approximate solutions to these optimization problems.
+```markdown
+
 
 ## Getting Started
 
@@ -30,7 +31,7 @@ Detailed usage examples can be found in the examples.ipynb file.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License.
 
 ## Acknowledgments
 
@@ -38,5 +39,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Akshay Vishwanathan
 - Andrey Kardashin
 
+## Contact 
+  For any comments or questions feel free to contact 
+  Dmitry Guskov, MSc student: dmitry.guskov@deepquantum.ai
 © 2023 Deep Quantum Lab. All rights reserved.
 ```
