@@ -19,6 +19,10 @@ These instructions will help you understand the implementation and run the provi
 You can install the required dependencies using pip:
 
 pip install numpy scipy
+
+### Using
+from qaoa import *
+
 ```
 
 ## Usage
@@ -54,7 +58,7 @@ This project is licensed under the MIT License.
 - Andrey Kardashin
 
 ## Contact 
-  For any comments or questions feel free to contact 
+  For any comments or questions feel free to contact
+  
   Dmitry Guskov, MSc student: dmitry.guskov@deepquantum.ai
 © 2023 Deep Quantum Lab. All rights reserved.
-```
