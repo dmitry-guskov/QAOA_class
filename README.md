@@ -1,7 +1,8 @@
-```markdown
 # Quantum Approximate Optimization Algorithm (QAOA)
 
 This repository contains a Python implementation of the Quantum Approximate Optimization Algorithm (QAOA) for solving various optimization problems. It includes functions to construct Ising Hamiltonians, k-SAT Hamiltonians, and solve the Max Cut problem. The QAOA logic can be used to find approximate solutions to these optimization problems.
+```markdown
+
 
 ## Getting Started
 
@@ -17,20 +18,38 @@ These instructions will help you understand the implementation and run the provi
 
 You can install the required dependencies using pip:
 
-```bash
 pip install numpy scipy
+
+### Using
+from qaoa import *
+
 ```
 
 ## Usage
 Detailed usage examples can be found in the examples.ipynb file.
 ### Example 1: Creating an Ising Hamiltonian and Finding Fisher Information Matrix
 ### Example 2: Creating a k-SAT Hamiltonian and Optimizing it with QAOA
+```python
+# Define the number of variables (n), clauses (k), and alpha for k-SAT Hamiltonian
+n = 5
+k = 3
+alpha = 2.0
+# Create a k-SAT Hamiltonian
+k_sat_hamiltonian = H_sat(n, k, alpha)
+# Initialize QAOA with a specific depth and the k-SAT Hamiltonian
+qaoa = QAOA(depth=2, H=k_sat_hamiltonian)
+# Run the QAOA optimization using the L-BFGS-B method
+qaoa.run_RI()
+# Print the optimization results
+print("QAOA Parameters:", qaoa.opt_angles)
+print("Optimized QAOA Energy:", qaoa.q_energy)
+```
 ### Example 3: Solving the Max Cut Problem
 
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License.
 
 ## Acknowledgments
 
@@ -38,5 +57,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - Akshay Vishwanathan
 - Andrey Kardashin
 
+## Contact 
+  For any comments or questions feel free to contact
+  
+  Dmitry Guskov, MSc student: dmitry.guskov@deepquantum.ai
 © 2023 Deep Quantum Lab. All rights reserved.
-```
