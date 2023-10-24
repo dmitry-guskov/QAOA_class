@@ -474,48 +474,65 @@ class QAOA:
                     f' Iternations: {self.opt_iter}')
 
         
-    def qaoa_qfi_matrix(self, pars, state_ini):
+    def qaoa_qfi_matrix(self, params, state_ini, return_grad=False):
         """Computes the Quantum Fisher Information (QFI) matrix for parameter sensitivity analysis.
             on state ini will be applied .ravel()
+            The order of the params is [gamma_1,...,gamma_p,beta_1,...beta_p]
         Args:
-            pars (_type_): _description_
+            params (_type_): _description_
             state_ini (_type_): _description_
-
+            return_grad (Bool): If true returns the gradient of circuit at the point (params)
         Returns:
-            _type_: _description_
+            _type_: Quantum Fisher Information matrix and a gradient (if return_grad=True)
         """        
         state_ini = state_ini.ravel()
-        n_pars = len(pars)
+        n_params = len(params)
         p = self.p
-        QFI_matrix = np.zeros((n_pars, n_pars), dtype=float)
+        QFI_matrix = np.zeros((n_params, n_params), dtype=float)
 
         statevector = np.copy(state_ini)
-        statevectors_der = []
+        statevectors_der = np.zeros((n_params,len(state_ini)),dtype=complex)
 
         for i in range(p):
-            n_pars_i = 2 * (i + 1)
 
             statevector_der_gamma = -1j *( self.H * statevector )
-            statevector_der_gamma = self.apply_gamma( pars[i], statevector_der_gamma)
-            statevector_der_gamma = self.apply_beta(pars[i + p], statevector_der_gamma)
+            statevector_der_gamma = self.apply_gamma( params[i], statevector_der_gamma)
+            statevector_der_gamma = self.apply_beta(params[i + p], statevector_der_gamma)
 
-            statevector = self.apply_gamma(pars[i], statevector)
-            statevector = self.apply_beta(pars[i + p], statevector)
+            statevector = self.apply_gamma(params[i], statevector)
+            statevector = self.apply_beta(params[i + p], statevector)
 
             statevector_der_beta = -1j * self.apply_Hx(statevector)
 
-            statevectors_der.append(statevector_der_gamma)
-            statevectors_der.append(statevector_der_beta)
+            statevectors_der[i] = statevector_der_gamma
+            statevectors_der[i+p] = statevector_der_beta
 
-            for j in range(n_pars_i - 2):
-                statevectors_der[j] = self.apply_gamma( pars[i], statevectors_der[j])
-                statevectors_der[j] = self.apply_beta(pars[i + p], statevectors_der[j])
+            for j in range(i):
+                statevectors_der[j] = self.apply_gamma( params[i], statevectors_der[j])
+                statevectors_der[j] = self.apply_beta(params[i + p], statevectors_der[j])
+                statevectors_der[j+p] = self.apply_gamma( params[i], statevectors_der[j+p])
+                statevectors_der[j+p] = self.apply_beta(params[i + p], statevectors_der[j+p])
 
-            for a in range(n_pars_i):
-                for b in range(n_pars_i - 2, n_pars_i):
+            for a in range(i+1):
+                for b in [i-1,i,i-1+p,i+p]:
                     term_1 = np.vdot(statevectors_der[a], statevectors_der[b])
                     term_2 = np.vdot(statevectors_der[a], statevector) * np.vdot(statevector, statevectors_der[b])
                     QFI_ab = 4 * (term_1 - term_2).real
                     QFI_matrix[a][b] = QFI_matrix[b][a] = QFI_ab
 
+                    term_1 = np.vdot(statevectors_der[a+p], statevectors_der[b])
+                    term_2 = np.vdot(statevectors_der[a+p], statevector) * np.vdot(statevector, statevectors_der[b])
+                    QFI_ab = 4 * (term_1 - term_2).real
+                    QFI_matrix[a+p][b] = QFI_matrix[b][a+p] = QFI_ab
+        
+        if return_grad:
+            gradient_list = np.zeros(n_params,float)
+            for i in range(len(statevectors_der)):
+                gradient_list[i] = 2 * np.real(np.vdot(
+                    statevectors_der[i],
+                    self.H * statevector
+                ))
+            return QFI_matrix, gradient_list
+
         return QFI_matrix
+
