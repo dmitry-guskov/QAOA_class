@@ -19,7 +19,7 @@ import time
 from functools import reduce
 from typing import List
 from numpy import ndarray
-from numpy import array, asarray, arange, copy, vdot, kron, eye, zeros, diag, sqrt, cos, sin, exp, pi
+
 
 
 def Graph_to_Hamiltonian(G, n):
@@ -68,9 +68,9 @@ def H_zz_Ising(n_qubits, bc="closed"):
     
     Hzz = np.zeros(2**n_qubits)
     for q in range(n_qubits - 1):
-        Hzz = Hzz + reduce(kron, [I]*q + [Z, Z] + [I]*(n_qubits-q-2))
+        Hzz = Hzz + reduce(np.kron, [I]*q + [Z, Z] + [I]*(n_qubits-q-2))
     if bc == "closed":
-        Hzz = Hzz + reduce(kron, [Z] + [I]*(n_qubits-2) + [Z])
+        Hzz = Hzz + reduce(np.kron, [Z] + [I]*(n_qubits-2) + [Z])
 
     return Hzz
 
@@ -108,7 +108,17 @@ def H_sat(n, k, alpha):
 
     return h
 
+def plus_state(n_qubits):
+    """makes a plus state
 
+    Args:
+        n_qubits (int): number of qubits
+
+    Returns:
+        ndarray: returns |+>^n
+    """    
+    d = 2**n_qubits
+    return np.array([1/np.sqrt(d)]*d,dtype='complex128') # |+>
 
 class QAOA:
     """ Encapsulates the Quantum Approximate Optimization Algorithm (QAOA) logic.
@@ -126,6 +136,7 @@ class QAOA:
         self.min = min(self.H)
         self.deg = len(self.H[self.H == self.min])
         self.p = depth
+        # TODO make a function to set these params 
         self.heruistic_LW_seed1 = 50
         self.heruistic_LW_seed2 = 20
         self.opt_angles = None
@@ -185,7 +196,7 @@ class QAOA:
         Returns:
             ndarray: _description_
         """        
-        return statevector * np.exp(-1j * gamma * self.H.reshape(2**self.n_qubits,1))
+        return  np.exp(-1j * gamma * self.H) * statevector
 
     def apply_Hx(self, statevector: ndarray) -> ndarray:
         """Applies the Hx operator to the state vector.
@@ -196,9 +207,12 @@ class QAOA:
         Returns:
             ndarray: _description_
         """        
+        x_list = self.x_list
+        n_qubits = self.n_qubits
+
         statevector_new = np.zeros(len(statevector), dtype=complex)
-        for i in range(self.n_qubits):
-            statevector_swap = statevector[self.x_list[i]]
+        for i in range(n_qubits):
+            statevector_swap = statevector[x_list[i]]
             statevector_new = statevector_swap + statevector_new
         return statevector_new
 
@@ -212,12 +226,13 @@ class QAOA:
         Returns:
             ndarray: _description_
         """        
+        x_list = self.x_list
         n_qubits = self.n_qubits
         c = np.cos(beta)
         s = np.sin(beta)
-        statevector_new = statevector.copy()
+        statevector_new = np.copy(statevector)
         for i in range(n_qubits):
-            statevector_swap = statevector_new[self.x_list[i]]
+            statevector_swap = statevector_new[x_list[i]]
             statevector_new = -1j * s * statevector_swap + c * statevector_new
         return statevector_new
     
@@ -230,8 +245,8 @@ class QAOA:
         Returns:
             ndarray: _description_
         """        
-        state = np.ones((2**self.n_qubits, 1), dtype='complex128') * (1 / np.sqrt(2**self.n_qubits))
-        p = int(len(angles) / 2)
+        state = plus_state(self.n_qubits)
+        p = self.p
         for i in range(p):
             state = self.apply_gamma(angles[i], state)
             state = self.apply_beta(angles[p + i], state)
@@ -247,7 +262,7 @@ class QAOA:
         Returns:
             ndarray: _description_
         """        
-        p = int(len(angles) / 2)
+        p = self.p
         for i in range(p):
             state = self.apply_gamma(angles[i], state)
             state = self.apply_beta(angles[p + i], state)
@@ -263,7 +278,7 @@ class QAOA:
             float: _description_
         """        
         state = self.qaoa_ansatz(angles)
-        ex = np.vdot(state, state * (self.H).reshape((2**self.n_qubits, 1)))
+        ex = np.vdot(state, state * self.H)
         return np.real(ex)
 
     def overlap(self, state: ndarray) -> float:
@@ -310,7 +325,7 @@ class QAOA:
         self.q_energy = self.expectation(res.x)
         self.q_error = self.q_energy - self.min
         self.f_state = self.qaoa_ansatz(res.x)
-        self.olap = self.overlap(self.f_state)[0]
+        self.olap = self.overlap(self.f_state)
         self.log = (
             f'Depth: {self.p} \n'
             f'Error: {self.q_error} \n'
@@ -322,8 +337,8 @@ class QAOA:
         )
 
     def run_heuristic_LW(self):
-        """Runs the QAOA using the heuristic L-BFGS-B optimization method.
-
+        """Runs the QAOA using the heuristic L-BFGS-B optimization method with layer-wise learning approach.
+            
         Returns:
             _type_: _description_
         """        
@@ -332,7 +347,7 @@ class QAOA:
         )
         bds = lambda x: [(0.1, 2 * np.pi)] * x + [(0.1, 1 * np.pi)] * x
 
-        def combine(a, b):
+        def combine(a, b): # function to insert angles of new layer to previously found optimum 
             a = list(a)
             b = list(b)
             a1 = a[0:int(len(a) / 2)]
@@ -346,6 +361,7 @@ class QAOA:
         temp = []
         t_start = time.time()
 
+        # find a good starting point for layer one
         for _ in range(self.heruistic_LW_seed1):
             initial_guess_p1 = initial_guess(1)
             res = minimize(
@@ -363,16 +379,18 @@ class QAOA:
         idx = np.argmin(temp[:, 0])
         opt_angles = temp[idx][1]
 
-        t_state = np.ones((2 ** self.n_qubits, 1), dtype='complex128') * (1 / np.sqrt(2 ** self.n_qubits))
+        t_state = np.ones((2 ** self.n_qubits, 1), dtype='complex128') * (1 / np.sqrt(2 ** self.n_qubits)) #|+>
 
-        while len(opt_angles) < 2 * self.p:
+        # optimize untill we find all params
+        while len(opt_angles) < 2 * self.p: 
             print('LW point now:', len(opt_angles) / 2)
-            ts1 = time.time()
+
             t_state = self.qaoa_ansatz(opt_angles)
 
+            # function to find optimum with respect to the fixed found angles
             ex = lambda x: np.real(np.vdot(
                 self.apply_ansatz(x, t_state),
-                self.apply_ansatz(x, t_state) * (self.H).reshape((2 ** self.n_qubits, 1))
+                self.apply_ansatz(x, t_state) * self.H
             ))
             temp = []
 
@@ -391,6 +409,8 @@ class QAOA:
             temp = np.asarray(temp, dtype=object)
             idx = np.argmin(temp[:, 0])
             lw_angles = temp[idx][1]
+
+            # now combine angles of new added layer and optimize all parameters together
             opt_angles = combine(opt_angles, lw_angles)
             res = minimize(
                 self.expectation,
@@ -410,12 +430,17 @@ class QAOA:
         self.q_energy = self.expectation(self.opt_angles)
         self.q_error = self.q_energy - self.min
         self.f_state = self.qaoa_ansatz(self.opt_angles)
-        self.olap = self.overlap(self.f_state)[0]
+        self.olap = self.overlap(self.f_state)
         self.log = (f' Depth: {self.p} \n Error: {self.q_error} \n QAOA_Eg: {self.q_energy} \n'
                     f' Exact_Eg: {self.min} \n Overlap: {self.olap} \n Exe_time: {self.exe_time} \n'
                     f' Iternations: {self.opt_iter}')
         
     def run(self):
+        """Runs the QAOA using the heuristic L-BFGS-B optimization method
+            
+        Returns:
+            _type_: _description_
+        """           
         initial_angles = []
         #TODO the problem that I found while was implementing this one is that Akshay and Ernesto have different angles order
         bds = [(0.1, 2 * np.pi)] * self.p + [(0.1, 1 * np.pi)] * self.p
@@ -442,7 +467,7 @@ class QAOA:
         self.q_energy = self.expectation(res.x)
         self.q_error = self.q_energy - self.min
         self.f_state = self.qaoa_ansatz(res.x)
-        self.olap = self.overlap(self.f_state)[0]
+        self.olap = self.overlap(self.f_state)
 
         self.log = (f' Depth: {self.p} \n Error: {self.q_error} \n QAOA_Eg: {self.q_energy} \n'
                     f' Exact_Eg: {self.min} \n Overlap: {self.olap} \n Exe_time: {self.exe_time} \n'
@@ -462,7 +487,7 @@ class QAOA:
         state_ini = state_ini.ravel()
         n_pars = len(pars)
         p = self.p
-        QFI_matrix = np.zeros((n_pars, n_pars), dtype=complex)
+        QFI_matrix = np.zeros((n_pars, n_pars), dtype=float)
 
         statevector = np.copy(state_ini)
         statevectors_der = []
@@ -471,11 +496,11 @@ class QAOA:
             n_pars_i = 2 * (i + 1)
 
             statevector_der_gamma = -1j *( self.H * statevector )
-            statevector_der_gamma = self.apply_gamma( pars[2 * i], statevector_der_gamma)
-            statevector_der_gamma = self.apply_beta(pars[2 * i + 1], statevector_der_gamma)
+            statevector_der_gamma = self.apply_gamma( pars[i], statevector_der_gamma)
+            statevector_der_gamma = self.apply_beta(pars[i + p], statevector_der_gamma)
 
-            statevector = self.apply_gamma(pars[2 * i], statevector)
-            statevector = self.apply_beta(pars[2 * i + 1], statevector)
+            statevector = self.apply_gamma(pars[i], statevector)
+            statevector = self.apply_beta(pars[i + p], statevector)
 
             statevector_der_beta = -1j * self.apply_Hx(statevector)
 
@@ -483,8 +508,8 @@ class QAOA:
             statevectors_der.append(statevector_der_beta)
 
             for j in range(n_pars_i - 2):
-                statevectors_der[j] = self.apply_gamma( pars[2 * i], statevectors_der[j])
-                statevectors_der[j] = self.apply_beta(pars[2 * i + 1], statevectors_der[j])
+                statevectors_der[j] = self.apply_gamma( pars[i], statevectors_der[j])
+                statevectors_der[j] = self.apply_beta(pars[i + p], statevectors_der[j])
 
             for a in range(n_pars_i):
                 for b in range(n_pars_i - 2, n_pars_i):
