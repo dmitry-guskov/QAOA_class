@@ -22,7 +22,12 @@ from numpy import ndarray
 
 
 
-def Graph_to_Hamiltonian(G, n):
+def Graph_to_Hamiltonian(G):
+    """Converts adjacency matrix into the Hamiltonian instance 
+
+    Args:
+        G (list or ndarray): adjacency matrix
+    """    
     def tensor(k):
         t = k[0]
         i = 1
@@ -31,7 +36,10 @@ def Graph_to_Hamiltonian(G, n):
             t = np.kron(t, k[i])
             i += 1
         return t
-
+    if type(G) == ndarray:
+        n = G.shape[0]
+    else:
+        n = len(G)
     H = np.zeros((2**n), dtype='float64')
     Z = np.array([1, -1], dtype='float64')
 
@@ -280,6 +288,34 @@ class QAOA:
         state = self.qaoa_ansatz(angles)
         ex = np.vdot(state, state * self.H)
         return np.real(ex)
+    
+    def finite_diff_grad(self, angles: List[float], delta=1e-3) -> ndarray:
+        """Computes the approximation value of the expectation functions gradient for a set of angles.
+
+        Args:
+            angles (List[float]): _description_
+
+        Returns:
+            ndarray: _description_
+        """        
+        n_params = len(angles)
+        output = np.zeros(n_params)
+
+        for i in range(n_params):
+            angles[i] += delta
+            state = self.qaoa_ansatz(angles)
+            f1 = np.vdot(state, state * self.H)
+
+            angles[i] -= 2*delta
+            state = self.qaoa_ansatz(angles)
+            f2 = np.vdot(state, state * self.H)
+
+            angles[i] += delta
+
+            output[i] = (f1 - f2)/(2 * delta)
+
+        return np.real(output)
+    
 
     def overlap(self, state: ndarray) -> float:
         """Calculates the overlap of a state with the ground state.
@@ -441,14 +477,9 @@ class QAOA:
         Returns:
             _type_: _description_
         """           
-        initial_angles = []
-        #TODO the problem that I found while was implementing this one is that Akshay and Ernesto have different angles order
-        bds = [(0.1, 2 * np.pi)] * self.p + [(0.1, 1 * np.pi)] * self.p
-        for i in range(2 * self.p):
-            if i < self.p:
-                initial_angles.append(random.uniform(0, 2 * np.pi))
-            else:
-                initial_angles.append(random.uniform(0, np.pi))
+
+        initial_angles = np.random.uniform(0, 2 * np.pi, 2*self.p)
+        bds = [(0.0, 2 * np.pi)] * self.p + [(0.0, 2 * np.pi)] * self.p
 
         t_start = time.time()
         res = minimize(
