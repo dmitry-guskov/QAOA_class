@@ -128,6 +128,63 @@ def plus_state(n_qubits):
     d = 2**n_qubits
     return np.array([1/np.sqrt(d)]*d,dtype='complex128') # |+>
 
+def create_depolarization_kraus(p_depolarization):
+    """Create Kraus operators and probabilities for the depolarization channel.
+    
+    Args:
+        p_depolarization (float): Probability of depolarization.
+
+    Returns:
+        List[np.ndarray], List[float]: List of Kraus operators and their probabilities.
+    """
+    kraus_ops = [
+        np.eye(2),
+        np.array([[0, 1], [1, 0]]),
+        np.array([[0, -1j], [1j, 0]]),
+        np.array([[1, 0], [0, -1]])
+    ]
+
+    probabilities = [np.sqrt(1 - 3*p_depolarization/4), np.sqrt(p_depolarization) / 2, np.sqrt(p_depolarization) / 2, np.sqrt(p_depolarization) / 2]
+
+    return kraus_ops, probabilities
+
+def create_amplitude_damping_kraus(p_amplitude_damping):
+    """Create Kraus operators and probabilities for the amplitude damping channel.
+    
+    Args:
+        p_amplitude_damping (float): Probability of amplitude damping.
+
+    Returns:
+        List[np.ndarray], List[float]: List of Kraus operators and their probabilities.
+    """
+    kraus_ops = [
+         np.array([[1/np.sqrt(1 - p_amplitude_damping),0],[0,1]]),
+         np.outer(np.array([0, 1]), np.array([1, 0]))
+    ]
+
+    probabilities = [np.sqrt(1 - p_amplitude_damping), np.sqrt(p_amplitude_damping)]
+
+    return kraus_ops, probabilities
+
+def create_phase_flip_kraus(p_phase_flip):
+    """Create Kraus operators and probabilities for the phase flip channel.
+    
+    Args:
+        p_phase_flip (float): Probability of phase flip.
+
+    Returns:
+        List[np.ndarray], List[float]: List of Kraus operators and their probabilities.
+    """
+    kraus_ops = [
+        np.eye(2),
+        np.array([[1, 0], [0, -1]])
+    ]
+
+    probabilities = [np.sqrt(1 - p_phase_flip), np.sqrt(p_phase_flip)]
+
+    return kraus_ops, probabilities
+
+
 class QAOA:
     """ Encapsulates the Quantum Approximate Optimization Algorithm (QAOA) logic.
     """    
@@ -289,6 +346,59 @@ class QAOA:
         ex = np.vdot(state, state * self.H)
         return np.real(ex)
     
+
+    def apply_ansatz_noise(self, angles: List[float], noise_prob: List[float], kraus_ops: List[np.ndarray]) -> np.ndarray:
+        """Applies the QAOA ansatz to the state vector with noise.
+
+        Args:
+            angles (List[float]): The list of QAOA angles.
+            noise_prob (List[float]): Probability of applying noise after each layer.
+            kraus_ops (List[np.ndarray]): List of Kraus operators representing different noise channels.
+
+        Returns:
+            np.ndarray: The state vector with noise applied.
+        """
+        state = plus_state(self.n_qubits)
+        p = self.p
+
+        I = np.eye(2)
+
+        for i in range(p):
+            state = self.apply_gamma(angles[i], state)
+            state = self.apply_beta(angles[p + i], state)
+            for q in range(self.n_qubits):
+                noise_ind = np.random.choice(len(noise_prob),size=1,p=noise_prob)[0]
+                # Apply noise by randomly selecting a Kraus operator
+                kraus_op = kraus_ops[noise_ind]
+                
+                # Generate Kraus operators for each qubit
+                kraus_operator_q = reduce(np.kron, [I]*q + [kraus_op] + [I]*(self.n_qubits-q-1))
+                state = np.dot(kraus_operator_q, state)
+
+        return state
+
+    def expectation_noise(self, angles: List[float], noise_prob: List[float], kraus_ops: List[np.ndarray], num_samples: int) -> float:
+        """Calculates the average expectation value with noise.
+
+        Args:
+            angles (List[float]): The list of QAOA angles.
+            noise_prob (List[float]): Probability of applying noise after each layer.
+            kraus_ops (List[np.ndarray]): List of Kraus operators representing different noise channels.
+            num_samples (int): Number of samples to average over.
+
+        Returns:
+            float: The average expectation value with noise.
+        """
+        noise_prob /= np.array(noise_prob).sum()
+        total_expectation = 0.0
+        for _ in range(num_samples):
+            noisy_state = self.apply_ansatz_noise(angles, noise_prob, kraus_ops)
+            ex = np.vdot(noisy_state, noisy_state * self.H)
+            total_expectation += np.real(ex)
+        return total_expectation / num_samples
+    
+
+
     def finite_diff_grad(self, angles: List[float], delta=1e-3) -> ndarray:
         """Computes the approximation value of the expectation functions gradient for a set of angles.
 
@@ -312,9 +422,9 @@ class QAOA:
 
             angles[i] += delta
 
-            output[i] = (f1 - f2)/(2 * delta)
+            output[i] = np.real((f1 - f2)/(2 * delta))
 
-        return np.real(output)
+        return output
     
 
     def overlap(self, state: ndarray) -> float:
