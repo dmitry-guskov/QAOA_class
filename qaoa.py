@@ -443,44 +443,6 @@ class QAOA:
                 olap += np.absolute(state[i])**2
         return olap
         
-    def run_RI(self):
-        """Runs the QAOA using the Richardson Iteration (RI) optimization method.
-        """        
-        t_start = time.time()
-        initial_angles = []
-        bds = [(0, 2 * np.pi)] * self.p + [(0, 1 * np.pi)] * self.p
-        for i in range(2 * self.p):
-            if i < self.p:
-                initial_angles.append(random.uniform(0, 2 * np.pi))
-            else:
-                initial_angles.append(random.uniform(0, np.pi))
-
-        res = minimize(
-            self.expectation,
-            initial_angles,
-            method='L-BFGS-B',
-            jac=None,
-            bounds=bds,
-            options={'maxfun': 150000}
-        )
-
-        t_end = time.time()
-        self.opt_angles = res.x
-        self.exe_time = float(t_end - t_start)
-        self.opt_iter = float(res.nfev)
-        self.q_energy = self.expectation(res.x)
-        self.q_error = self.q_energy - self.min
-        self.f_state = self.qaoa_ansatz(res.x)
-        self.olap = self.overlap(self.f_state)
-        self.log = (
-            f'Depth: {self.p} \n'
-            f'Error: {self.q_error} \n'
-            f'QAOA_Eg: {self.q_energy} \n'
-            f'Exact_Eg: {self.min} \n'
-            f'Overlap: {self.olap} \n'
-            f'Exe_time: {self.exe_time} \n'
-            f'Iterations: {self.opt_iter}'
-        )
 
     def run_heuristic_LW(self):
         """Runs the QAOA using the heuristic L-BFGS-B optimization method with layer-wise learning approach.
@@ -588,7 +550,7 @@ class QAOA:
             _type_: _description_
         """           
 
-        initial_angles = np.random.uniform(0, 2 * np.pi, 2*self.p)
+        initial_angles = np.random.uniform(0, np.pi, 2*self.p)
         bds = [(0.0, 2 * np.pi)] * self.p + [(0.0, 2 * np.pi)] * self.p
 
         t_start = time.time()
