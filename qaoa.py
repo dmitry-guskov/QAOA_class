@@ -23,10 +23,10 @@ from numpy import ndarray
 
 
 def Graph_to_Hamiltonian(G):
-    """Converts adjacency matrix into the Hamiltonian instance 
+    """Converts an adjacency matrix into a Hamiltonian instance assuming connectivity is a ZZ gate.
 
     Args:
-        G (list or ndarray): adjacency matrix
+        G (list or ndarray): Adjacency matrix representing the graph.
     """    
     def tensor(k):
         t = k[0]
@@ -36,10 +36,12 @@ def Graph_to_Hamiltonian(G):
             t = np.kron(t, k[i])
             i += 1
         return t
-    if type(G) == ndarray:
+    
+    if isinstance(G, ndarray):
         n = G.shape[0]
     else:
         n = len(G)
+    
     H = np.zeros((2**n), dtype='float64')
     Z = np.array([1, -1], dtype='float64')
 
@@ -61,18 +63,18 @@ def Graph_to_Hamiltonian(G):
 
 
 def H_zz_Ising(n_qubits, bc="closed"):
-    """Constructs the Ising Hamiltonian.
+    """Constructs the Hamiltonian for the ZZ model (simpliest Ising example).
 
     Args:
-        n_qubits (_type_): _description_
-        bc (str, optional): _description_. Defaults to "closed".
+        n_qubits (int): Number of qubits representing the system.
+        bc (str, optional): Boundary condition. Defaults to "closed".
 
     Returns:
-        _type_: _description_
+        ndarray: Diagonal elements of the Hamiltonian.
     """    
-    # Function that constructs the Ising Hamiltonian
-    Z = np.array([1., -1.],)
-    I = np.array([1.,1.])
+    # Constructs the Ising Hamiltonian
+    Z = np.array([1., -1.])
+    I = np.array([1., 1.])
     
     Hzz = np.zeros(2**n_qubits)
     for q in range(n_qubits - 1):
@@ -82,19 +84,18 @@ def H_zz_Ising(n_qubits, bc="closed"):
 
     return Hzz
 
+
 def H_sat(n, k, alpha):
-    """Constructs the k-SAT Hamiltonian from random clauses.
-            A slightly naive approach without checking that all terms\clauses persist 
+    """Constructs the Hamiltonian for k-SAT problems from random clauses.
+
     Args:
-        n (_type_): _description_
-        k (_type_): _description_
-        alpha (_type_): _description_
+        n (int): Number of variables.
+        k (int): Number of literals in each clause.
+        alpha (float): Scaling factor for the number of clauses.
 
     Returns:
-        _type_: _description_
+        ndarray: Diagonal elements of the Hamiltonian for k-SAT.
     """    
-    # Function that constructs the k-SAT Hamiltonian from a list of random clauses
-
     I_prime = np.array([1, 1])
     rho_0_prime = np.array([1, 0])
     rho_1_prime = np.array([0, 1])
@@ -116,21 +117,23 @@ def H_sat(n, k, alpha):
 
     return h
 
+
 def plus_state(n_qubits):
-    """makes a plus state
+    """Generates a |+⟩ state to the tensor power of n_qubits.
 
     Args:
-        n_qubits (int): number of qubits
+        n_qubits (int): Number of qubits.
 
     Returns:
-        ndarray: returns |+>^n
+        ndarray: Superposition state |+⟩^n_qubits.
     """    
     d = 2**n_qubits
-    return np.array([1/np.sqrt(d)]*d,dtype='complex128') # |+>
+    return np.array([1/np.sqrt(d)]*d, dtype='complex128')  # |+⟩
+
 
 def create_depolarization_kraus(p_depolarization):
-    """Create Kraus operators and probabilities for the depolarization channel.
-    
+    """Creates Kraus operators and probabilities for the depolarization channel.
+
     Args:
         p_depolarization (float): Probability of depolarization.
 
@@ -144,7 +147,8 @@ def create_depolarization_kraus(p_depolarization):
         np.array([[1, 0], [0, -1]])
     ]
 
-    probabilities = [np.sqrt(1 - 3*p_depolarization/4), np.sqrt(p_depolarization) / 2, np.sqrt(p_depolarization) / 2, np.sqrt(p_depolarization) / 2]
+    probabilities = [np.sqrt(1 - 3*p_depolarization/4), np.sqrt(p_depolarization) / 2,
+                     np.sqrt(p_depolarization) / 2, np.sqrt(p_depolarization) / 2]
 
     return kraus_ops, probabilities
 
@@ -560,7 +564,7 @@ class QAOA:
             method='L-BFGS-B',
             jac=None,
             bounds=bds,
-            options={'maxiter': 5000}
+            options={'maxiter': 15000}
         )
         t_end = time.time()
 

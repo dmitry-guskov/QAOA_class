@@ -34,17 +34,24 @@ Detailed usage examples can be found in the examples.ipynb file.
 n = 5
 k = 3
 alpha = 2.0
+
 # Create a k-SAT Hamiltonian
 k_sat_hamiltonian = H_sat(n, k, alpha)
+
+depth = 2
 # Initialize QAOA with a specific depth and the k-SAT Hamiltonian
-qaoa = QAOA(depth=2, H=k_sat_hamiltonian)
+qaoa = QAOA(depth=depth, H=k_sat_hamiltonian)
+
+
 # Run the QAOA optimization using the L-BFGS-B method
-qaoa.run_RI()
+qaoa.run()
 # Print the optimization results
-print("QAOA Parameters:", qaoa.opt_angles)
-print("Optimized QAOA Energy:", qaoa.q_energy)
+with np.printoptions(precision=3, suppress=True):
+    print("QAOA Parameters:", qaoa.opt_angles)
+    print("Optimized QAOA Energy:", qaoa.q_energy)
 ```
 ### Example 3: Solving the Max Cut Problem
+### Example 4: Solving QAOA in the presence of noise
 
 
 ## License
