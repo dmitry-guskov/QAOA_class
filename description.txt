@@ -1,0 +1,31 @@
+QAOA Implementation for Ising Hamiltonian, k-SAT Hamiltonian, and maxCUT Hamiltonian
+This script embodies the Quantum Approximate Optimization Algorithm (QAOA), designed to solve combinatorial optimization problems. The problems considered here can be mapped to Ising models, such as maxCUT and maxSAT. The core aspects of this implementation are summarized as follows:
+
+1. Functions for Constructing Hamiltonians:
+Graph_to_Hamiltonian: Converts an adjacency matrix into a Hamiltonian instance, assuming ZZ gates for connectivity in the graph.
+
+H_zz_Ising: Constructs the Hamiltonian for the ZZ model, a fundamental example in Ising models. It returns an array representing the diagonal elements of the Hamiltonian.
+
+H_sat: Generates the Hamiltonian for maxSAT instances, aiming to solve k-Satisfiability problems. It constructs a Hamiltonian from a list of random clauses.
+
+plus_state: Generates the |+⟩ state to the tensor power of 'n', representing a superposition of all binary strings in the Z basis.
+
+2. Noise Model Creation:
+create_depolarization_kraus, create_amplitude_damping_kraus, create_phase_flip_kraus: These functions create a noise model simulating random unitaries inserted after each layer in the circuit. These unitaries represent channels and are utilized to mimic quantum jumps in the circuit.
+3. QAOA Class:
+The QAOA class serves as the centerpiece, encapsulating functionalities related to the QAOA algorithm. Key features include:
+
+Initialization: The class initializes by storing the Hamiltonian, constructing the QAOA ansatz, and setting various parameters for optimization.
+
+Ansatz Construction: It constructs the QAOA ansatz by applying alternating layers of mixer and the exponent of the Hamiltonian, resulting in a quantum state output.
+
+Optimization: The class offers methods for optimization, such as run_heuristic_LW, which implements a layer-wise optimization approach, gradually adding layers to optimize the QAOA angles.
+
+Quantum Fisher Information: It provides the functionality to compute the Quantum Fisher Information (QFI) matrix, crucial for investigating the curvature of the parametrization space and facilitating advanced optimization techniques like natural gradient descent.
+
+4. Contributors:
+Main contributors: Ernesto Luis Campos Espinoza, Akshay Vishwanathan.
+Additional contributor: Andrey Kardashin.
+Assembled by Dmitry Guskov.
+© 2023 Deep Quantum Lab. All rights reserved.
+This implementation demonstrates the versatility of QAOA in solving optimization problems by leveraging Ising models and quantum-inspired techniques.

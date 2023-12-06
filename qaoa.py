@@ -102,7 +102,7 @@ def H_sat(n, k, alpha):
 
     h = np.zeros(2**n)
 
-    for i in range(int(alpha) * n):
+    for i in range(int(alpha * n)):
         t = np.random.choice(n, n - k, replace=False)  # Positions of I matrix
         C_prime = 1
         for j in range(n):
@@ -148,7 +148,7 @@ def create_depolarization_kraus(p_depolarization):
     ]
 
     probabilities = [np.sqrt(1 - 3*p_depolarization/4), np.sqrt(p_depolarization) / 2,
-                     np.sqrt(p_depolarization) / 2, np.sqrt(p_depolarization) / 2]
+                    np.sqrt(p_depolarization) / 2, np.sqrt(p_depolarization) / 2]
 
     return kraus_ops, probabilities
 
@@ -162,8 +162,8 @@ def create_amplitude_damping_kraus(p_amplitude_damping):
         List[np.ndarray], List[float]: List of Kraus operators and their probabilities.
     """
     kraus_ops = [
-         np.array([[1/np.sqrt(1 - p_amplitude_damping),0],[0,1]]),
-         np.outer(np.array([0, 1]), np.array([1, 0]))
+        np.array([[1/np.sqrt(1 - p_amplitude_damping),0],[0,1]]),
+        np.outer(np.array([0, 1]), np.array([1, 0]))
     ]
 
     probabilities = [np.sqrt(1 - p_amplitude_damping), np.sqrt(p_amplitude_damping)]
