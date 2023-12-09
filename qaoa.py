@@ -102,7 +102,7 @@ def H_sat(n, k, alpha):
 
     h = np.zeros(2**n)
 
-    for i in range(int(alpha * n)):
+    for i in range(int(alpha*n)):
         t = np.random.choice(n, n - k, replace=False)  # Positions of I matrix
         C_prime = 1
         for j in range(n):
@@ -148,7 +148,7 @@ def create_depolarization_kraus(p_depolarization):
     ]
 
     probabilities = [np.sqrt(1 - 3*p_depolarization/4), np.sqrt(p_depolarization) / 2,
-                    np.sqrt(p_depolarization) / 2, np.sqrt(p_depolarization) / 2]
+                     np.sqrt(p_depolarization) / 2, np.sqrt(p_depolarization) / 2]
 
     return kraus_ops, probabilities
 
@@ -162,8 +162,8 @@ def create_amplitude_damping_kraus(p_amplitude_damping):
         List[np.ndarray], List[float]: List of Kraus operators and their probabilities.
     """
     kraus_ops = [
-        np.array([[1/np.sqrt(1 - p_amplitude_damping),0],[0,1]]),
-        np.outer(np.array([0, 1]), np.array([1, 0]))
+         np.array([[1/np.sqrt(1 - p_amplitude_damping),0],[0,1]]),
+         np.outer(np.array([0, 1]), np.array([1, 0]))
     ]
 
     probabilities = [np.sqrt(1 - p_amplitude_damping), np.sqrt(p_amplitude_damping)]
@@ -364,12 +364,14 @@ class QAOA:
         """
         state = plus_state(self.n_qubits)
         p = self.p
+        noise_prob /= np.array(noise_prob).sum()
 
         I = np.eye(2)
 
         for i in range(p):
             state = self.apply_gamma(angles[i], state)
             state = self.apply_beta(angles[p + i], state)
+            #TODO this step can be optimized by makeing the whole noise operator in place insted of applying 1-local operators
             for q in range(self.n_qubits):
                 noise_ind = np.random.choice(len(noise_prob),size=1,p=noise_prob)[0]
                 # Apply noise by randomly selecting a Kraus operator
@@ -379,6 +381,7 @@ class QAOA:
                 kraus_operator_q = reduce(np.kron, [I]*q + [kraus_op] + [I]*(self.n_qubits-q-1))
                 state = np.dot(kraus_operator_q, state)
 
+        state = state/(np.linalg.norm(state))
         return state
 
     def expectation_noise(self, angles: List[float], noise_prob: List[float], kraus_ops: List[np.ndarray], num_samples: int) -> float:
@@ -633,6 +636,7 @@ class QAOA:
                     QFI_matrix[a+p][b] = QFI_matrix[b][a+p] = QFI_ab
         
         if return_grad:
+            # Compute the gradient of the circuit if return_grad=True
             gradient_list = np.zeros(n_params,float)
             for i in range(len(statevectors_der)):
                 gradient_list[i] = 2 * np.real(np.vdot(
