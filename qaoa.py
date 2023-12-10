@@ -163,7 +163,7 @@ def create_amplitude_damping_kraus(p_amplitude_damping):
     """
     kraus_ops = [
          np.array([[1/np.sqrt(1 - p_amplitude_damping),0],[0,1]]),
-         np.outer(np.array([0, 1]), np.array([1, 0]))
+         np.outer(np.array([1, 0]), np.array([0, 1]))
     ]
 
     probabilities = [np.sqrt(1 - p_amplitude_damping), np.sqrt(p_amplitude_damping)]
