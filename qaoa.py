@@ -130,6 +130,15 @@ def plus_state(n_qubits):
     d = 2**n_qubits
     return np.array([1/np.sqrt(d)]*d, dtype='complex128')  # |+⟩
 
+def fidelity(state1, state2):
+    '''Calculates fidelity between two pure states
+
+    Args:
+        state1 (ndarray): quatnum state
+        state2 (ndarray): quantum state
+    '''
+    F = np.real(np.vdot(state1, state2) *np.vdot(state2, state1))
+    return F
 
 def create_depolarization_kraus(p_depolarization):
     """Creates Kraus operators and probabilities for the depolarization channel.
@@ -367,13 +376,14 @@ class QAOA:
         noise_prob /= np.array(noise_prob).sum()
 
         I = np.eye(2)
-
         for i in range(p):
             state = self.apply_gamma(angles[i], state)
             state = self.apply_beta(angles[p + i], state)
             #TODO this step can be optimized by makeing the whole noise operator in place insted of applying 1-local operators
+            noise_inds = []
             for q in range(self.n_qubits):
                 noise_ind = np.random.choice(len(noise_prob),size=1,p=noise_prob)[0]
+                noise_inds.append(noise_ind)                
                 # Apply noise by randomly selecting a Kraus operator
                 kraus_op = kraus_ops[noise_ind]
                 
@@ -381,10 +391,10 @@ class QAOA:
                 kraus_operator_q = reduce(np.kron, [I]*q + [kraus_op] + [I]*(self.n_qubits-q-1))
                 state = np.dot(kraus_operator_q, state)
 
-        state = state/(np.linalg.norm(state))
         return state
 
-    def expectation_noise(self, angles: List[float], noise_prob: List[float], kraus_ops: List[np.ndarray], num_samples: int) -> float:
+
+    def expectation_noise(self, angles: List[float], noise_prob: List[float], kraus_ops: List[np.ndarray], num_samples: int, return_state=False) -> float:
         """Calculates the average expectation value with noise.
 
         Args:
@@ -397,14 +407,13 @@ class QAOA:
             float: The average expectation value with noise.
         """
         noise_prob /= np.array(noise_prob).sum()
-        total_expectation = 0.0
-        for _ in range(num_samples):
-            noisy_state = self.apply_ansatz_noise(angles, noise_prob, kraus_ops)
-            ex = np.vdot(noisy_state, noisy_state * self.H)
-            total_expectation += np.real(ex)
-        return total_expectation / num_samples
-    
-
+        noisy_state = self.apply_ansatz_noise(angles, noise_prob, kraus_ops)
+        for _ in range(num_samples-1):
+            noisy_state += self.apply_ansatz_noise(angles, noise_prob, kraus_ops)
+        total_state = noisy_state/np.linalg.norm(noisy_state)
+        if return_state:
+            return np.real(np.vdot(total_state, total_state * self.H)), total_state
+        return np.real(np.vdot(total_state, total_state * self.H))
 
     def finite_diff_grad(self, angles: List[float], delta=1e-3) -> ndarray:
         """Computes the approximation value of the expectation functions gradient for a set of angles.
