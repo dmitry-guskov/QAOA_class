@@ -29,8 +29,6 @@ from qaoa import *
 Detailed usage examples can be found in the examples.ipynb file.
 ### Example 1: Creating an Ising Hamiltonian and Finding Fisher Information Matrix
 ```python
-# Example 1: Creating an Ising Hamiltonian and Finding Fisher Information Matrix
-
 # Define the number of qubits and connectivity type ("open" or "closed")
 n_qubits = 4
 connectivity = "closed"
