@@ -28,6 +28,30 @@ from qaoa import *
 ## Usage
 Detailed usage examples can be found in the examples.ipynb file.
 ### Example 1: Creating an Ising Hamiltonian and Finding Fisher Information Matrix
+```python
+# Example 1: Creating an Ising Hamiltonian and Finding Fisher Information Matrix
+
+# Define the number of qubits and connectivity type ("open" or "closed")
+n_qubits = 4
+connectivity = "closed"
+
+# Create an Ising Hamiltonian
+ising_hamiltonian = H_zz_Ising(n_qubits, connectivity)
+
+depth = 1
+# Initialize QAOA with a specific depth and the Ising Hamiltonian
+qaoa = QAOA(depth=depth, H=ising_hamiltonian)
+
+# Define a set of parameters
+angles = [0.5, 0.2]*depth  # Adjust these parameters as needed
+
+# Calculate the Fisher Information Matrix
+qfi_matrix = qaoa.qaoa_qfi_matrix(angles, state_ini=plus_state(n_qubits)) #|+>
+
+print("Fisher Information Matrix:")
+with np.printoptions(precision=3, suppress=True):
+    print(qfi_matrix)
+```
 ### Example 2: Creating a k-SAT Hamiltonian and Optimizing it with QAOA
 ```python
 # Define the number of variables (n), clauses (k), and alpha for k-SAT Hamiltonian
