@@ -75,7 +75,22 @@ with np.printoptions(precision=3, suppress=True):
 ### Example 3: Solving the Max Cut Problem
 ### Example 4: Solving QAOA in the presence of noise
 
+## Full description
+The given code is an implementation of the Quantum Approximate Optimization Algorithm (QAOA) to solve optimization problems. It includes functions to construct maxCUT Hamiltonian, Ising Hamiltonian, k-SAT Hamiltonian, QAOA ansatz, and optimization methods.
 
+Let's understand the code in detail:
+
+1. The code starts with importing necessary libraries such as `numpy`, `scipy.optimize`, `random`, `time`, `functools`, and `List` from `typing`.
+
+2. It then defines functions to convert a graph into a Hamiltonian, construct the Hamiltonian for the ZZ model (simpliest Ising example), and construct the Hamiltonian for k-SAT problems from random clauses.
+
+3. Next, it defines functions to create different types of noise channels such as depolarization, amplitude damping, and phase flip.
+
+4. After that, it defines a class `QAOA` which encapsulates the logic for the Quantum Approximate Optimization Algorithm. The class includes methods to apply gamma, Hx, and beta operators, generate QAOA ansatz state, apply ansatz to the state vector, compute expectation value, apply ansatz with noise, calculate the overlap of a state with the ground state, run the QAOA using heuristic L-BFGS-B optimization method, and compute the Quantum Fisher Information (QFI) matrix for parameter sensitivity analysis.
+
+5. The class also includes a method to generate a list of indices for state vector swapping in the mixer.
+
+6. Finally, the class includes methods to run the QAOA using the heuristic L-BFGS-B optimization method with layer-wise learning approach.
 ## License
 
 This project is licensed under the MIT License.
