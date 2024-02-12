@@ -324,7 +324,11 @@ class QAOA:
             ndarray: _description_
         """        
         state = plus_state(self.n_qubits)
-        p = self.p
+
+        if len(angles) % 2 != 0:
+            raise ValueError("Number of angles must be even.")
+        p = len(angles) // 2
+        
         for i in range(p):
             state = self.apply_gamma(angles[i], state)
             state = self.apply_beta(angles[p + i], state)
@@ -340,7 +344,10 @@ class QAOA:
         Returns:
             ndarray: _description_
         """        
-        p = self.p
+        if len(angles) % 2 != 0:
+            raise ValueError("Number of angles must be even.")
+        
+        p = len(angles) // 2
         for i in range(p):
             state = self.apply_gamma(angles[i], state)
             state = self.apply_beta(angles[p + i], state)
@@ -489,7 +496,10 @@ class QAOA:
         for _ in range(self.heruistic_LW_seed1):
             initial_guess_p1 = initial_guess(1)
             res = minimize(
-                self.expectation,
+                lambda x: np.real(np.vdot(
+                self.apply_ansatz(x, plus_state(self.n_qubits)),
+                self.apply_ansatz(x, plus_state(self.n_qubits)) * self.H
+                )),
                 initial_guess_p1,
                 method='L-BFGS-B',
                 jac=None,
@@ -497,17 +507,15 @@ class QAOA:
                 options={'maxfun': 10000}
             )
 
-            temp.append([self.expectation(res.x), initial_guess_p1])
+            temp.append([res.fun, initial_guess_p1])
 
         temp = np.asarray(temp, dtype=object)
         idx = np.argmin(temp[:, 0])
         opt_angles = temp[idx][1]
 
-        t_state = np.ones((2 ** self.n_qubits, 1), dtype='complex128') * (1 / np.sqrt(2 ** self.n_qubits)) #|+>
-
         # optimize untill we find all params
         while len(opt_angles) < 2 * self.p: 
-            print('LW point now:', len(opt_angles) / 2)
+            # print('LW point now:', len(opt_angles) / 2)
 
             t_state = self.qaoa_ansatz(opt_angles)
 
@@ -810,7 +818,6 @@ class QAOA:
         return self.opt_angles, self.q_energy, cost_values
 
     def run_heuristic_LW_with_tracking(self):
-        # TODO complete this part.
         """Runs the QAOA using the heuristic L-BFGS-B optimization method with layer-wise learning approach
         and tracks the cost function with the number of evaluations
         
@@ -839,32 +846,37 @@ class QAOA:
 
         temp = []
         t_start = time.time()
+        cost_values = []
 
-        # Find a good starting point for layer one
+
+        # find a good starting point for layer one
         for _ in range(self.heruistic_LW_seed1):
             initial_guess_p1 = initial_guess(1)
             res = minimize(
-                self.expectation,
+                lambda x: np.real(np.vdot(
+                self.apply_ansatz(x, plus_state(self.n_qubits)),
+                self.apply_ansatz(x, plus_state(self.n_qubits)) * self.H
+                )),
                 initial_guess_p1,
                 method='L-BFGS-B',
                 jac=None,
                 bounds=bds(1),
-                options={'maxfun': 10000}
+                options={'maxfun': 10000},
             )
-
-            temp.append([self.expectation(res.x), initial_guess_p1])
+            temp.append([res.fun, initial_guess_p1])
 
         temp = np.asarray(temp, dtype=object)
         idx = np.argmin(temp[:, 0])
         opt_angles = temp[idx][1]
+        opt_en = temp[idx][0]
+        cost_values += [opt_en]*self.heruistic_LW_seed1
 
         t_state = np.ones((2 ** self.n_qubits, 1), dtype='complex128') * (1 / np.sqrt(2 ** self.n_qubits))  # |+>
 
-        cost_values = []
+
 
         # Optimize until we find all params
         while len(opt_angles) < 2 * self.p:
-            print('LW point now:', len(opt_angles) / 2)
 
             t_state = self.qaoa_ansatz(opt_angles)
 
@@ -882,7 +894,7 @@ class QAOA:
                     method='L-BFGS-B',
                     jac=None,
                     bounds=bds(1),
-                    options={'maxfun': 10000}
+                    options={'maxfun': 10000},
                 )
 
                 temp.append([res.fun, res.x])
@@ -890,6 +902,8 @@ class QAOA:
             temp = np.asarray(temp, dtype=object)
             idx = np.argmin(temp[:, 0])
             lw_angles = temp[idx][1]
+            lw_en = temp[idx][0]
+            cost_values += [lw_en]*self.heruistic_LW_seed2
 
             # Now combine angles of new added layer and optimize all parameters together
             opt_angles = combine(opt_angles, lw_angles)
@@ -907,7 +921,7 @@ class QAOA:
         t_end = time.time()
         exe_time = float(t_end - t_start)
         opt_iter = float(res.nfev)
-        q_energy = self.expectation(opt_angles)
+        q_energy = res.fun
         q_error = q_energy - self.min
         f_state = self.qaoa_ansatz(opt_angles)
         olap = self.overlap(f_state)
