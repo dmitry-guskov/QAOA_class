@@ -19,6 +19,7 @@ import time
 from functools import reduce
 from typing import List
 from numpy import ndarray
+from protes import protes_general
 
 
 
@@ -576,7 +577,7 @@ class QAOA:
         self.opt_angles = opt_angles
 
         self.exe_time = float(t_end - t_start)
-        self.opt_iter = float(res.nfev)
+        self.opt_iter = res.nfev
         self.q_energy = res.fun 
         self.q_error = self.q_energy - self.min
         self.f_state = self.qaoa_ansatz(self.opt_angles)
@@ -614,8 +615,8 @@ class QAOA:
 
         self.opt_angles = res.x
         self.exe_time = float(t_end - t_start)
-        self.opt_iter = float(res.nfev)
-        self.q_energy = self.expectation(res.x)
+        self.opt_iter = res.nfev
+        self.q_energy = res.fun
         self.q_error = self.q_energy - self.min
         self.f_state = self.qaoa_ansatz(res.x)
         self.olap = self.overlap(self.f_state)
@@ -745,7 +746,7 @@ class QAOA:
 
         self.opt_angles = res.x
         self.exe_time = float(t_end - t_start)
-        self.opt_iter = float(res.nfev)
+        self.opt_iter = res.nfev
         self.q_energy = res.fun
         self.q_error = self.q_energy - self.min
         self.f_state = self.qaoa_ansatz(res.x)
@@ -755,5 +756,49 @@ class QAOA:
                     f' Exact_Eg: {self.min} \n Overlap: {self.olap} \n Exe_time: {self.exe_time} \n'
                     f' Iterations: {self.opt_iter}')
         
+        if track_energy:
+            self.track_cost = False
+
+    def run_PROTES(self, a=0, b=2*np.pi, size=100, m=int(2.E+3), track_energy=False):
+        """Runs the QAOA using the PROTES optimization method
+            
+        Returns:
+            _type_: _description_
+        """           
+
+        # a = 0        # Grid lower bound
+        # b = 2 * np.pi        # Grid upper bound
+        mode_size = [size]*2*self.p # number of points in grid
+        # m = int(2.E+3)   # Number of requests to the objective function
+
+        def func(I):
+            """Target function: y=f(I); [samples,d] -> [samples]."""
+            return  np.array([self.expectation(a + I[i,:]/np.array(mode_size)*(b-a)) for i in range(I.shape[0])])     
+
+        if track_energy:
+            self.track_cost = True
+        protes_log = {}
+
+        t_start = time.time()
+        
+        i_opt, y_opt  = protes_general(func, mode_size, m, info=protes_log,  with_info_i_opt_list=True)
+
+        t_end = time.time()
+
+        x = a + i_opt/np.array(mode_size) * (b-a)
+
+
+        self.protes_log = protes_log
+        self.opt_angles = x
+        self.exe_time = float(t_end - t_start)
+        self.opt_iter = protes_log['m']
+        self.q_energy = y_opt
+        self.q_error = self.q_energy - self.min
+        self.f_state = self.qaoa_ansatz(self.opt_angles)
+        self.olap = self.overlap(self.f_state)
+
+        self.log = (f' Depth: {self.p} \n Error: {self.q_error} \n QAOA_Eg: {self.q_energy} \n'
+                    f' Exact_Eg: {self.min} \n Overlap: {self.olap} \n Exe_time: {self.exe_time} \n'
+                    f' Iternations: {self.opt_iter}')
         if track_energy:
             self.track_cost = False
