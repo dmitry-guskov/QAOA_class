@@ -628,7 +628,7 @@ class QAOA:
             self.track_cost = False
 
         
-    def qaoa_qfi_matrix(self, params, state_ini, return_grad=False, return_cost=False):
+    def qaoa_qfi_matrix(self, params, state_ini=None, return_grad=False):
         """Computes the Quantum Fisher Information (QFI) matrix for parameter sensitivity analysis.
         on state ini will be applied .ravel()
         The order of the params is [gamma_1,...,gamma_p,beta_1,...beta_p]
@@ -642,8 +642,11 @@ class QAOA:
         Returns:
             _type_: Quantum Fisher Information matrix and a gradient (if return_grad=True), 
             or just the Quantum Fisher Information matrix (if both return_grad and return_cost are False)
-        """        
-        state_ini = state_ini.ravel()
+        """ 
+        if  state_ini is None:
+            state_ini = plus_state(self.n_qubits)       
+        else:
+            state_ini = state_ini.ravel()
         n_params = len(params)
         p = self.p
         QFI_matrix = np.zeros((n_params, n_params), dtype=float)
@@ -691,21 +694,13 @@ class QAOA:
                     statevectors_der[i],
                     self.H * statevector
                 ))
-            if return_cost:
-                # If both return_grad and return_cost are True, return both gradient and cost
-                return QFI_matrix, gradient_list, np.real(np.vdot(statevector, self.H * statevector))
-            else:
-                # If only return_grad is True, return only the gradient
-                return QFI_matrix, gradient_list
+            # If  return_grad is True, return  the gradient
+            return QFI_matrix, gradient_list
         
-        if return_cost:
-            # If only return_cost is True, return only the cost
-            return QFI_matrix, np.real(np.vdot(statevector, self.H * statevector))
-        
-        # If neither return_grad nor return_cost is True, return just the QFI_matrix
+        # If return_grad  is not True, return just the QFI_matrix
         return QFI_matrix
 
-    def run_QFI(self, track_energy=False):
+    def run_QFI(self, track_energy=False, estimate_QFI_iter=False):
         """Runs the QAOA optimization using the Quantum Fisher Information/natural gradient descent optimization method
             # NOTE keep track of cost or number of evals doesn't work properly due to QFI matrix calculation 
             # TODO estimate how many evals on one call of QFI, it should depend on depth 
@@ -716,17 +711,18 @@ class QAOA:
         bds = [(0.0, 2 * np.pi)] * self.p + [(0.0, 2 * np.pi)] * self.p
 
         def expectation_and_grad(x):
-            qfi_matrix, grad, cost = self.qaoa_qfi_matrix(x, plus_state(self.n_qubits), return_grad=True, return_cost=True) #|+>
+            qfi_matrix, grad = self.qaoa_qfi_matrix(x, plus_state(self.n_qubits), return_grad=True) 
+            cost = self.expectation(x)
+            # estimation for QFI numbers of eval:
+            if estimate_QFI_iter and self.track_cost: 
+                self.tracked_cost += [cost]*self.p*2
             # Compute the natural gradient
             try:
                 natural_grad = np.linalg.inv(qfi_matrix) @ grad
             except np.linalg.LinAlgError:
                 # If the matrix is not invertible, use the gradient instead
                 natural_grad = grad
-            if self.track_cost:
-                self.tracked_cost.append(cost)
-            if self.track_eval:
-                self.eval_num+=1
+
             return cost, natural_grad
         
         if track_energy:
@@ -758,6 +754,8 @@ class QAOA:
         
         if track_energy:
             self.track_cost = False
+            
+
 
     def run_PROTES(self, a=0, b=2*np.pi, size=100, m=int(2.E+3), track_energy=False):
         """Runs the QAOA using the PROTES optimization method
