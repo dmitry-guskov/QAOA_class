@@ -215,9 +215,8 @@ class QAOA:
         self.min = min(self.H)
         self.deg = len(self.H[self.H == self.min])
         self.p = depth
-        # TODO make a function to set these params 
-        self.heruistic_LW_seed1 = 50
-        self.heruistic_LW_seed2 = 20
+
+
         self.opt_angles = None
         self.exe_time = None
         self.opt_iter = None
@@ -230,7 +229,23 @@ class QAOA:
         self.track_eval = True
         self.track_cost = False
         self.tracked_cost = []
-    
+        self.protes_log = None
+
+
+    def reset(self):
+
+        self.opt_angles = None
+        self.exe_time = None
+        self.opt_iter = None
+        self.q_energy = None
+        self.q_error = None
+        self.f_state = None
+        self.olap = None
+        self.log = None
+        self.eval_num = 0
+        self.tracked_cost = []
+        self.protes_log = None
+
     def mixer_list(self):
         """Generates a list of indices for state vector swapping in the mixer.
 
@@ -321,7 +336,7 @@ class QAOA:
     
     def qaoa_ansatz(self, angles: List[float]) -> ndarray:
         """ Generates the QAOA ansatz state for a given set of angles.
-            # NOTE this is just an apply_ansatz(angles, plus_state)
+            # NOTE this is the same as apply_ansatz(angles, plus_state)
         Args:
             angles (List[float]): _description_
 
@@ -473,14 +488,66 @@ class QAOA:
             if self.H[i] == g_ener:
                 olap += np.absolute(state[i])**2
         return olap
-        
 
-    def run_heuristic_LW(self, track_energy=False):
+##################################################################################################        
+# -------------------------- OPTIMIZATION STRATEGIES --------------------------------------------#
+##################################################################################################    
+
+
+
+
+    def run(self, track_energy=False, initial_params=None):
+        """Runs the QAOA using the heuristic L-BFGS-B optimization method
+            
+        Returns:
+            _type_: _description_
+        """           
+        if initial_params == None:
+            if self.opt_angles == None: 
+                initial_angles = np.random.uniform(0, np.pi, 2*self.p)
+            else: 
+                initial_angles = self.opt_angles
+        else: 
+            initial_angles = initial_params
+
+        bds = [(0.0, 2 * np.pi)] * self.p + [(0.0, 2 * np.pi)] * self.p
+
+        if track_energy:
+            self.track_cost = True
+
+        t_start = time.time()
+        res = minimize(
+            self.expectation,
+            initial_angles,
+            method='L-BFGS-B',
+            jac=None,
+            bounds=bds,
+            options={'maxiter': 10000},
+        )
+        t_end = time.time()
+
+        self.opt_angles = res.x
+        self.exe_time = float(t_end - t_start)
+        self.opt_iter = res.nfev
+        self.q_energy = res.fun
+        self.q_error = self.q_energy - self.min
+        self.f_state = self.qaoa_ansatz(res.x)
+        self.olap = self.overlap(self.f_state)
+
+        self.log = (f' Depth: {self.p} \n Error: {self.q_error} \n QAOA_Eg: {self.q_energy} \n'
+                    f' Exact_Eg: {self.min} \n Overlap: {self.olap} \n Exe_time: {self.exe_time} \n'
+                    f' Iternations: {self.opt_iter}')
+        if track_energy:
+            self.track_cost = False
+
+
+    def run_heuristic_LW(self, track_energy=False, heruistic_LW_seed1=20, heruistic_LW_seed2=50 ):
         """Runs the QAOA using the heuristic L-BFGS-B optimization method with layer-wise learning approach.
             
         Returns:
             _type_: _description_
         """        
+
         initial_guess = lambda x: (
             [random.uniform(0, 2 * np.pi) for _ in range(x)] + [random.uniform(0, np.pi) for _ in range(x)]
         )
@@ -507,7 +574,7 @@ class QAOA:
 
 
         # find a good starting point for layer one
-        for _ in range(self.heruistic_LW_seed1):
+        for _ in range(heruistic_LW_seed1):
             initial_guess_p1 = initial_guess(1)
             res = minimize(
                 lambda x:  self.expectation(x),
@@ -543,7 +610,7 @@ class QAOA:
             
             temp = []
 
-            for _ in range(self.heruistic_LW_seed2):
+            for _ in range(heruistic_LW_seed2):
                 res = minimize(
                     partial_expectation,
                     initial_guess(1),
@@ -589,43 +656,6 @@ class QAOA:
             self.track_cost = False
         
 
-    def run(self, track_energy=False):
-        """Runs the QAOA using the heuristic L-BFGS-B optimization method
-            
-        Returns:
-            _type_: _description_
-        """           
-
-        initial_angles = np.random.uniform(0, np.pi, 2*self.p)
-        bds = [(0.0, 2 * np.pi)] * self.p + [(0.0, 2 * np.pi)] * self.p
-
-        if track_energy:
-            self.track_cost = True
-
-        t_start = time.time()
-        res = minimize(
-            self.expectation,
-            initial_angles,
-            method='L-BFGS-B',
-            jac=None,
-            bounds=bds,
-            options={'maxiter': 10000},
-        )
-        t_end = time.time()
-
-        self.opt_angles = res.x
-        self.exe_time = float(t_end - t_start)
-        self.opt_iter = res.nfev
-        self.q_energy = res.fun
-        self.q_error = self.q_energy - self.min
-        self.f_state = self.qaoa_ansatz(res.x)
-        self.olap = self.overlap(self.f_state)
-
-        self.log = (f' Depth: {self.p} \n Error: {self.q_error} \n QAOA_Eg: {self.q_energy} \n'
-                    f' Exact_Eg: {self.min} \n Overlap: {self.olap} \n Exe_time: {self.exe_time} \n'
-                    f' Iternations: {self.opt_iter}')
-        if track_energy:
-            self.track_cost = False
 
         
     def qaoa_qfi_matrix(self, params, state_ini=None, return_grad=False):
@@ -700,15 +730,22 @@ class QAOA:
         # If return_grad  is not True, return just the QFI_matrix
         return QFI_matrix
 
-    def run_QFI(self, track_energy=False, estimate_QFI_iter=False):
+    def run_QFI(self, track_energy=False, estimate_QFI_iter=False, initial_params=None):
         """Runs the QAOA optimization using the Quantum Fisher Information/natural gradient descent optimization method
             # NOTE keep track of cost or number of evals doesn't work properly due to QFI matrix calculation 
             # TODO estimate how many evals on one call of QFI, it should depend on depth 
         Returns:
             _type_: _description_
         """           
-        initial_angles = np.random.uniform(0, np.pi, 2*self.p)
+        if initial_params == None:
+            if self.opt_angles == None: 
+                initial_angles = np.random.uniform(0, np.pi, 2*self.p)
+            else: 
+                initial_angles = self.opt_angles
+        else: 
+            initial_angles = initial_params
         bds = [(0.0, 2 * np.pi)] * self.p + [(0.0, 2 * np.pi)] * self.p
+
 
         def expectation_and_grad(x):
             qfi_matrix, grad = self.qaoa_qfi_matrix(x, plus_state(self.n_qubits), return_grad=True) 
