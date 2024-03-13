@@ -18,8 +18,7 @@ This script embodies the Quantum Approximate Optimization Algorithm (QAOA), desi
     - Quantum Fisher Information: It provides the functionality to compute the Quantum Fisher Information (QFI) matrix, crucial for investigating the curvature of the parametrization space and facilitating advanced optimization techniques like natural gradient descent.
 
 4. Contributors:
-    - Main contributors: Ernesto Luis Campos Espinoza, Akshay Vishwanathan.
-    - Additional contributor: Andrey Kardashin.
+    - Main contributors: Ernesto Luis Campos Espinoza, Akshay Vishwanathan, Andrey Kardashin
     - Assembled by Dmitry Guskov.
 
 © 2023 Deep Quantum Lab. All rights reserved.
