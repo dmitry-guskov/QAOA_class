@@ -5,12 +5,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from cmaes._cma import CMA
-from qaoa import QAOA
+from src.qaoa import QAOA
 from scipy import stats
 from protes import animation as protes_animation
 import matplotlib.animation as animation
 from pylab import rcParams
 import math
+from scipy.optimize import minimize
+from matplotlib.animation import FuncAnimation
+from scipy.optimize import differential_evolution
 
 rcParams["figure.figsize"] = 10, 5
 
@@ -194,6 +197,92 @@ def func_build_qaoa(n):
     i_opt_real = None
     return func, a, b, i_opt_real
 
+def de_animation(task, fpath=None):
+    k_sat_hamiltonian = np.array([0., 1., 2., 1., 0., 1., 2., 1., 1., 1., 2., 0., 1., 1., 2., 0.])    
+    qaoa_instance = QAOA(depth=1, H=k_sat_hamiltonian)
+    solutions = []
+    functions = []
+
+    N = 100
+    beta_array = np.linspace(0,2*np.pi,N)
+    gamma_array = np.linspace(0,2*np.pi,N)
+    def save_points(intermediate_result, convergence ):
+        solutions.append(intermediate_result)
+        functions.append(qaoa_instance.expectation(intermediate_result))
+
+    # Create a figure and axis for the plot
+    fig, ax = plt.subplots()
+
+    result = differential_evolution(qaoa_instance.expectation, bounds=[(0,2*np.pi),(0,2*np.pi)], callback=save_points)
+
+    cost = np.zeros((len(beta_array),len(gamma_array)),dtype = float)
+    land = np.dstack(np.meshgrid(beta_array, gamma_array))
+    for i in range(len(beta_array)):
+        for j in range(len(gamma_array)):
+            cost[i,j] = qaoa_instance.expectation(land[i,j])
+
+    # print(solutions)
+    def update_plot(frame):
+        if frame == 0:
+            ax.imshow(cost)
+        else:
+            # ax.clear()
+            solution = solutions[frame - 1]
+            function_value = functions[frame - 1]
+            ax.plot(solution[0]/ (2*np.pi/N), solution[1]/ (2*np.pi/N), color='red', marker='o', markersize=5)
+            ax.set_title(f'Iteration: {frame}')
+
+
+    # Save the animation as a GIF
+    anim = FuncAnimation(fig, update_plot, frames=len(solutions), interval=1000)
+
+    writergif = animation.PillowWriter(fps=10)
+    anim.save(fpath, writer=writergif)
+
+def gd_animation(task, fpath=None):
+    k_sat_hamiltonian = np.array([0., 1., 2., 1., 0., 1., 2., 1., 1., 1., 2., 0., 1., 1., 2., 0.])    
+    qaoa_instance = QAOA(depth=1, H=k_sat_hamiltonian)
+    solutions = []
+    functions = []
+
+    N = 100
+    beta_array = np.linspace(0,2*np.pi,N)
+    gamma_array = np.linspace(0,2*np.pi,N)
+
+    def save_points(x):
+        solutions.append(x)
+        functions.append(qaoa_instance.expectation(angles=x))
+    # Create a figure and axis for the plot
+    fig, ax = plt.subplots()
+
+    result = minimize(qaoa_instance.expectation, [np.pi-0.05,np.pi-0.05], callback=save_points)
+
+    cost = np.zeros((len(beta_array),len(gamma_array)),dtype = float)
+    land = np.dstack(np.meshgrid(beta_array, gamma_array))
+    for i in range(len(beta_array)):
+        for j in range(len(gamma_array)):
+            cost[i,j] = qaoa_instance.expectation(land[i,j])
+
+    # print(solutions)
+    def update_plot(frame):
+        if frame == 0:
+            ax.imshow(cost)
+        else:
+            # ax.clear()
+            solution = solutions[frame - 1]
+            function_value = functions[frame - 1]
+            ax.plot(solution[0]/ (2*np.pi/N), solution[1]/ (2*np.pi/N), color='red', marker='o', markersize=5)
+            ax.set_title(f'Iteration: {frame}')
+
+
+    # Save the animation as a GIF
+    anim = FuncAnimation(fig, update_plot, frames=len(solutions), interval=1000)
+
+    writergif = animation.PillowWriter(fps=10)
+    anim.save(fpath, writer=writergif)
+
+
+
 
 def animate(method, task):
     fpath = os.path.dirname(__file__) + f'/{method}_{task}.gif'
@@ -201,7 +290,7 @@ def animate(method, task):
         if task == 'qaoa':
             n = 101
             f, a, b, i_opt_real = func_build_qaoa(np.array([n, n]))
-            print("protes_animation call")
+            print("Running PROTES method for QAOA task")
 
             protes_animation(f, a, b, n, m=int(2.E+2), k=25, k_top=5, k_gd=10, lr=1.E-2,
                              i_opt_real=i_opt_real, fpath=fpath)
@@ -215,19 +304,36 @@ def animate(method, task):
             cmaes_animation(task, fpath=fpath)
         else:
             raise NotImplementedError(f'Task name "{task}" is not supported for method "{method}"')
+    elif method == 'de':
+        if task == 'qaoa':
+            print("Running differential evolution method for QAOA task")
+
+            de_animation(task, fpath=fpath)
+        else:
+            raise NotImplementedError(f'Task name "{task}" is not supported for method "{method}"')
+        
+    elif method == 'gd':
+        if task == 'qaoa':
+            print("Running gradient descent method for QAOA task")
+
+            gd_animation(task, fpath=fpath)
+        else:
+            raise NotImplementedError(f'Task name "{task}" is not supported for method "{method}"')
+        
+
     else:
         raise NotImplementedError(f'Method "{method}" is not supported')
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("method", choices=["protes", "cmaes"])
+    parser.add_argument("method", choices=["protes", "cmaes", "minimize", "de", "gd"])
     parser.add_argument("task", choices=["qaoa"])
     args = parser.parse_args()
-
     animate(args.method, args.task)
 
 
 if __name__ == "__main__":
     main()
 
+#TODO change reference to src
