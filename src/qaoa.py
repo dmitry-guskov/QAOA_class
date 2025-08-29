@@ -184,6 +184,8 @@ def create_depolarization_kraus(p_depolarization):
     Returns:
         List[np.ndarray], List[float]: List of Kraus operators and their probabilities.
     """
+    if not 0 <= p_depolarization <= 1:
+        raise ValueError("Depolarization probability must be between 0 and 1.")
     kraus_ops = [
         np.eye(2),
         np.array([[0, 1], [1, 0]]),
@@ -191,8 +193,7 @@ def create_depolarization_kraus(p_depolarization):
         np.array([[1, 0], [0, -1]])
     ]
 
-    probabilities = [np.sqrt(1 - 3*p_depolarization/4), np.sqrt(p_depolarization) / 2,
-                     np.sqrt(p_depolarization) / 2, np.sqrt(p_depolarization) / 2]
+    probabilities = [np.sqrt(1 - 3*p_depolarization/4)] + [np.sqrt(p_depolarization) / 2] * 3
 
     return kraus_ops, probabilities
 
@@ -205,6 +206,8 @@ def create_amplitude_damping_kraus(p_amplitude_damping):
     Returns:
         List[np.ndarray], List[float]: List of Kraus operators and their probabilities.
     """
+    if not 0 <= p_amplitude_damping <= 1:
+        raise ValueError("Depolarization probability must be between 0 and 1.")
     kraus_ops = [
          np.array([[1/np.sqrt(1 - p_amplitude_damping),0],[0,1]]),
          np.array([[0,1],[0,0]])
@@ -223,6 +226,8 @@ def create_phase_flip_kraus(p_phase_flip):
     Returns:
         List[np.ndarray], List[float]: List of Kraus operators and their probabilities.
     """
+    if not 0 <= p_phase_flip <= 1:
+        raise ValueError("Depolarization probability must be between 0 and 1.")
     kraus_ops = [
         np.eye(2),
         np.array([[1, 0], [0, -1]])
@@ -1051,3 +1056,86 @@ class QAOA:
         
         if track_energy:
             self.track_cost = False
+
+
+
+    def run_mcts(self, track_energy=False, b=5, simulations=1000, exploration_weight=1.0):
+        """Runs the QAOA using Monte Carlo Tree Search (MCTS) for parameter optimization."""
+        t_start = time.time()
+
+        # Initialize root node and discretized parameter space
+        root = MCTSNode()
+        parameter_space = np.linspace(0, np.pi, b)  # Discretized parameter values
+
+        for _ in range(simulations):
+            # Selection: Traverse the tree to a leaf node using UCB
+            node = root
+            while node.is_fully_expanded(len(parameter_space)) and len(node.parameters) < 2 * self.p:
+                node = node.best_child(exploration_weight)
+
+            # Expansion: Add a new child if not fully expanded
+            if len(node.parameters) < 2 * self.p:
+                next_param = parameter_space[len(node.children)]  # Select the next discrete value
+                node = node.expand(next_param)
+
+            # Simulation: Complete the parameters randomly and evaluate the cost function
+            remaining_params = 2 * self.p - len(node.parameters)
+            complete_params = node.parameters + list(np.random.choice(parameter_space, remaining_params))
+            cost = self.expectation(complete_params)
+
+            # Backpropagation: Update the tree with the simulation result
+            while node:
+                node.backpropagate(-cost)  # Negate cost for minimization
+                node = node.parent
+
+        # Select the best parameters from the root's children
+        best_node = max(root.children, key=lambda child: child.value / child.visits)
+        best_angles = best_node.parameters + list(np.random.choice(parameter_space, 2 * self.p - len(best_node.parameters)))
+
+        t_end = time.time()
+
+        # Save results
+        self.opt_angles = best_angles
+        self.exe_time = float(t_end - t_start)
+        self.q_energy = self.expectation(best_angles)
+        self.q_error = self.q_energy - self.min
+        self.f_state = self.qaoa_ansatz(best_angles)
+        self.olap = self.overlap(self.f_state)
+
+        self.log = (f'Depth: {self.p} \n Error: {self.q_error} \n QAOA_Eg: {self.q_energy} \n'
+                    f'Exact_Eg: {self.min} \n Overlap: {self.olap} \n Exe_time: {self.exe_time} \n')
+
+        if track_energy:
+            self.track_cost = False
+
+
+
+
+class MCTSNode:
+    def __init__(self, parameters=None, parent=None):
+        self.parameters = parameters or []  # Current parameters at this node
+        self.parent = parent  # Parent node
+        self.children = []  # Child nodes
+        self.visits = 0  # Number of visits to this node
+        self.value = 0  # Cumulative value (cost) of this node
+
+    def is_fully_expanded(self, branching_factor):
+        return len(self.children) >= branching_factor
+
+    def best_child(self, exploration_weight=1.0):
+        """Select child node based on UCB1."""
+        return max(
+            self.children,
+            key=lambda child: child.value / child.visits + exploration_weight * np.sqrt(np.log(self.visits) / (child.visits + 1))
+        )
+
+    def expand(self, next_param):
+        """Add a new child node with the next parameter."""
+        new_node = MCTSNode(self.parameters + [next_param], parent=self)
+        self.children.append(new_node)
+        return new_node
+
+    def backpropagate(self, result):
+        """Update node statistics during backpropagation."""
+        self.visits += 1
+        self.value += result
