@@ -105,6 +105,11 @@ def H_zz_Ising(n_qubits, bc="closed"):
     Returns:
         ndarray: Diagonal elements of the Hamiltonian.
     """    
+    if not isinstance(n_qubits, (int, np.integer)) or n_qubits < 1 or bc not in ("open", "closed"):
+        raise ValueError("Expected a positive qubit count and open/closed boundary.")
+    # Periodic indexed bonds: n=1 gives I; n=2 counts the bond twice.
+    if n_qubits == 1:
+        return np.ones(2) if bc == "closed" else np.zeros(2)
     # Constructs the Ising Hamiltonian
     Z = np.array([1., -1.])
     I = np.array([1., 1.])
@@ -246,7 +251,13 @@ class QAOA:
             depth (int): QAOA depth.
             H (ndarray): Diagonal Hamiltonian.
         """
-        self.H = H
+        diagonal = np.asarray(H)
+        if (diagonal.ndim != 1 or len(diagonal) < 2 or len(diagonal) & (len(diagonal)-1)
+                or not np.isrealobj(diagonal) or not np.isfinite(diagonal).all()):
+            raise ValueError("H must be a finite real power-of-two diagonal with at least one qubit.")
+        if not isinstance(depth, (int, np.integer)) or depth < 1:
+            raise ValueError("depth must be a positive integer.")
+        self.H = diagonal.astype(float, copy=True)
         self.n_qubits = int(np.log2(len(self.H)))
         self.x_list = self.mixer_list()
         self.min = min(self.H)
@@ -534,7 +545,7 @@ class QAOA:
             _type_: _description_
         """           
         if initial_params is None:
-            if self.opt_angles is None or not self.opt_angles.any(): 
+            if self.opt_angles is None:
                 initial_angles = np.random.uniform(0, np.pi, 2*self.p)
             else: 
                 initial_angles = self.opt_angles
@@ -572,131 +583,101 @@ class QAOA:
             self.track_cost = False
 
 
-    def run_heuristic_LW(self, track_energy=False, heruistic_LW_seed1=20, heruistic_LW_seed2=20, stop_on_min=False, track_min=True ):
-        """Runs the QAOA using the heuristic L-BFGS-B optimization method with layer-wise learning approach.
-            
-        Returns:
-            _type_: _description_
-        """        
+    def run_heuristic_LW(self, track_energy=False, heruistic_LW_seed1=20,
+                         heruistic_LW_seed2=20, stop_on_min=False, track_min=True,
+                         bds=None, *, seed=None):
+        """Select optimized restart results, then grow the circuit layer by layer.
 
-        initial_guess = lambda x: (
-            [random.uniform(0, 2 * np.pi) for _ in range(x)] + [random.uniform(0, np.pi) for _ in range(x)]
-        )
-
-        bds = [(0.0, 2 * np.pi)] * self.p + [(0.0, 2 * np.pi)] * self.p
-        bds_f = lambda x: [bds[i] for i in range(x)] + [bds[i+self.p] for i in range(x)]
-        # [(0., 2 * np.pi)] * x + [(0., 2 * np.pi)] * x
-
-        def combine(a, b): # function to insert angles of new layer to previously found optimum 
-            a = list(a)
-            b = list(b)
-            a1 = a[0:int(len(a) / 2)]
-            a2 = a[int(len(a) / 2)::]
-            b1 = b[0:int(len(b) / 2)]
-            b2 = b[int(len(b) / 2)::]
-            a = a1 + b1
-            b = a2 + b2
-            return a + b
-        
-
-        if track_energy:
-            self.track_cost = True
-
-        temp = []
-
-        t_start = time.time()
-
-
-        # find a good starting point for layer one
-        for _ in range(heruistic_LW_seed1):
-            initial_guess_p1 = initial_guess(1)
-            res = minimize(
-                lambda x:  self.expectation(x),
-                initial_guess_p1,
-                method='L-BFGS-B',
-                jac=None,
-                bounds=bds_f(1),
-                options={'maxfun': 10000},
-            )
-
-            temp.append([res.fun, initial_guess_p1])
-
-        temp = np.asarray(temp, dtype=object)
-        idx = np.argmin(temp[:, 0])
-        opt_angles = temp[idx][1]
-        p_min = -1
-        # optimize untill we find all params
-        while len(opt_angles) < 2 * self.p: 
-            # print('LW point now:', len(opt_angles) / 2)
-
-            t_state = self.qaoa_ansatz(opt_angles)
-
-            # function to find optimum with respect to the fixed found angles
-            def partial_expectation(x):
-                if self.track_eval:
-                    self.eval_num += 1
-                en = np.real(np.vdot(
-                self.apply_ansatz(x, t_state),
-                self.apply_ansatz(x, t_state) * self.H))
-                if self.track_cost:
-                    self.tracked_cost.append(en)
-                return en
-            
-            temp = []
-
-            for _ in range(heruistic_LW_seed2):
-                res = minimize(
-                    partial_expectation,
-                    initial_guess(1),
-                    method='L-BFGS-B',
-                    jac=None,
-                    bounds=bds_f(1),
-                    options={'maxfun': 10000},
-                )
-
-                temp.append([res.fun, res.x])
-
-            temp = np.asarray(temp, dtype=object)
-            idx = np.argmin(temp[:, 0])
-            lw_angles = temp[idx][1]
-
-            # now combine angles of new added layer and optimize all parameters together
-            opt_angles = combine(opt_angles, lw_angles)
-            res = minimize(
-                self.expectation,
-                opt_angles,
-                method='L-BFGS-B',
-                jac=None,
-                bounds=bds_f(int(len(opt_angles) / 2)),
-                options={'maxfun': 10000},
-            )
-            opt_angles = res.x
-
-            if stop_on_min and np.isclose(res.fun, self.min, atol=0.001):
-                break
-            if track_min and np.isclose(res.fun, self.min, atol=0.001):
-                t_min = time.time()
-                p_min = len(opt_angles)//2
-                track_min = False
-        t_end = time.time()
-
-
-        self.opt_angles = opt_angles
-        
-        if p_min != -1:
-            self.lw_log = (float(t_min - t_start), p_min)
-
-        self.exe_time = float(t_end - t_start)
-        self.opt_iter = res.nfev
-        self.q_energy = res.fun 
-        self.q_error = self.q_energy - self.min
-        self.f_state = self.qaoa_ansatz(self.opt_angles)
+        Return the selected OptimizeResult with total energy-evaluation accounting.
+        A first-hit depth is a numerical upper bound, not a minimum-depth proof.
+        """
+        from scipy.optimize import OptimizeResult
+        if (self.p < 1 or any(not isinstance(v, (int, np.integer)) or v < 1
+                             for v in (heruistic_LW_seed1, heruistic_LW_seed2))):
+            raise ValueError("Positive depth and restart counts are required.")
+        if bds is None or len(bds) == 0:
+            bds = [(0., 2*np.pi)]*(2*self.p)
+        bounds = np.asarray(bds, dtype=float)
+        if (bounds.shape != (2*self.p, 2) or not np.isfinite(bounds).all()
+                or np.any(bounds[:, 0] > bounds[:, 1])):
+            raise ValueError("Expected finite ordered bounds for all 2*p parameters.")
+        rng = np.random if seed is None else np.random.default_rng(seed)
+        def layer_bounds(depth):
+            return np.concatenate((bounds[:depth], bounds[self.p:self.p+depth]))
+        def guess(depth):
+            b = layer_bounds(depth)
+            return rng.uniform(b[:, 0], b[:, 1])
+        total_nfev, total_nit = 0, 0
+        def optimize(fun, x, depth):
+            nonlocal total_nfev, total_nit
+            result = minimize(fun, x, method='L-BFGS-B', bounds=layer_bounds(depth),
+                              options={'maxfun': 10000})
+            total_nfev += result.nfev
+            total_nit += result.get('nit', 0)
+            return result
+        previous_tracking = self.track_cost
+        self.track_cost = previous_tracking or track_energy
+        start = time.time()
+        self.lw_log = None
+        try:
+            selected = min((optimize(self.expectation, guess(1), 1)
+                            for _ in range(heruistic_LW_seed1)), key=lambda r: r.fun)
+            angles = selected.x.copy()
+            depth = 1
+            while True:
+                at_minimum = np.isclose(selected.fun, self.min, atol=.001, rtol=0)
+                if track_min and self.lw_log is None and at_minimum:
+                    self.lw_log = (time.time()-start, depth)
+                if depth == self.p or (stop_on_min and at_minimum):
+                    break
+                state = self.qaoa_ansatz(angles)
+                def partial_energy(x):
+                    evolved = self.apply_ansatz(x, state)
+                    value = float(np.vdot(evolved, self.H*evolved).real)
+                    if self.track_eval:
+                        self.eval_num += 1
+                    if self.track_cost:
+                        self.tracked_cost.append(value)
+                    return value
+                # Appended angles obey the bounds for the new chronological layer.
+                new_bounds = bounds[[depth, self.p+depth]]
+                candidates = []
+                for _ in range(heruistic_LW_seed2):
+                    x = rng.uniform(new_bounds[:, 0], new_bounds[:, 1])
+                    result = minimize(partial_energy, x, method='L-BFGS-B',
+                                      bounds=new_bounds, options={'maxfun': 10000})
+                    total_nfev += result.nfev
+                    total_nit += result.get('nit', 0)
+                    candidates.append(result)
+                appended = min(candidates, key=lambda r: r.fun).x
+                angles = np.concatenate((angles[:depth], appended[:1],
+                                         angles[depth:], appended[1:]))
+                depth += 1
+                selected = optimize(self.expectation, angles, depth)
+                angles = selected.x.copy()
+            # Tie every reported field to the same selected circuit, including p=1.
+            energy = self.expectation(angles)
+            total_nfev += 1
+        finally:
+            self.track_cost = previous_tracking
+        result = OptimizeResult(selected)
+        result.x, result.fun = angles, energy
+        result.nfev, result.nit = total_nfev, total_nit
+        result.depth = depth
+        self.optimization_result = result
+        # Keep the requested-depth warm start valid after early stopping.
+        self.optimized_depth = depth
+        padding = np.zeros(self.p-depth)
+        self.opt_angles = np.concatenate((angles[:depth], padding, angles[depth:], padding))
+        self.q_energy = energy
+        self.exe_time, self.opt_iter = time.time()-start, total_nfev
+        self.q_error = energy-self.min
+        self.f_state = self.qaoa_ansatz(angles)
         self.olap = self.overlap(self.f_state)
-        self.log = (f' Depth: {self.p} \n Error: {self.q_error} \n QAOA_Eg: {self.q_energy} \n'
-                    f' Exact_Eg: {self.min} \n Overlap: {self.olap} \n Exe_time: {self.exe_time} \n'
-                    f' Iternations: {self.opt_iter}')
-        if track_energy:
-            self.track_cost = False
+        self.log = (f'Depth: {depth}\nError: {self.q_error}\nQAOA_Eg: {energy}\n'
+                    f'Exact_Eg: {self.min}\nOverlap: {self.olap}\n'
+                    f'Energy evaluations: {total_nfev}')
+        return result
         
 
 
@@ -911,12 +892,14 @@ class QAOA:
             self.track_cost = False
 
 
-    def run_cmaes(self, generations=100, track_energy=False, initial_params=None, sigma=1.,n_max_resampling=100, lr_adapt=True, population_size=None):
+    def run_cmaes(self, generations=100, track_energy=False, initial_params=None, sigma=1.,n_max_resampling=100, lr_adapt=True, population_size=None, *, seed=None):
         """Runs the QAOA using the cmaes optimization method
             
         Returns:
             _type_: _description_
         """      
+        if not isinstance(generations, (int, np.integer)) or generations < 1:
+            raise ValueError("generations must be a positive integer.")
         from cmaes import CMA
         # mean: ndarray,
         # sigma: float,
@@ -927,7 +910,7 @@ class QAOA:
         # cov: ndarray | None = None,
         # lr_adapt: bool = False
         if initial_params is None:
-            if self.opt_angles is None or not self.opt_angles.any(): 
+            if self.opt_angles is None:
                 initial_angles = np.random.uniform(0, np.pi, 2*self.p)
             else: 
                 initial_angles = self.opt_angles
@@ -936,37 +919,47 @@ class QAOA:
         bds = [(0.0, 2 * np.pi)] * self.p + [(0.0, 2 * np.pi)] * self.p
         bds_f = lambda x: np.array([[bds[i][0],bds[i][1]] for i in range(x)] + [[bds[i+x][0],bds[i+x][1]] for i in range(x)])
 
-        optimizer = CMA(mean=initial_angles, sigma=sigma, n_max_resampling=n_max_resampling, lr_adapt=lr_adapt, population_size=population_size, bounds=bds_f(self.p))
+        initial_angles = np.asarray(initial_angles, dtype=float).copy()
+        if initial_angles.shape != (2*self.p,) or not np.isfinite(initial_angles).all():
+            raise ValueError("Expected exactly 2*p finite initial parameters.")
+        optimizer = CMA(mean=initial_angles, seed=seed, sigma=sigma, n_max_resampling=n_max_resampling, lr_adapt=lr_adapt, population_size=population_size, bounds=bds_f(self.p))
 
 
-        if track_energy:
-            self.track_cost = True
+        previous_tracking = self.track_cost
+        self.track_cost = previous_tracking or track_energy
 
         t_start = time.time()
         
         opt_iter = 0
+        best_value, best_angles = np.inf, None
 
-        for _ in range(generations):
-            solutions = []
-            for _ in range(optimizer.population_size):
-                x = optimizer.ask()
-                value = self.expectation(x)
-                solutions.append((x, value))
-                opt_iter+=1
-            optimizer.tell(solutions)
+        try:
+            for _ in range(generations):
+                solutions = []
+                for _ in range(optimizer.population_size):
+                    x = optimizer.ask()
+                    value = self.expectation(x)
+                    solutions.append((x, value))
+                    if value < best_value:
+                        best_value, best_angles = value, np.asarray(x).copy()
+                    opt_iter+=1
+                optimizer.tell(solutions)
 
-            if optimizer.should_stop():
-                break
+                if optimizer.should_stop():
+                    break
 
+
+        finally:
+            self.track_cost = previous_tracking
 
         t_end = time.time()
 
 
 
-        self.opt_angles = x
+        self.opt_angles = best_angles
         self.exe_time = float(t_end - t_start)
         self.opt_iter = opt_iter
-        self.q_energy = value
+        self.q_energy = best_value
         self.q_error = self.q_energy - self.min
         self.f_state = self.qaoa_ansatz(self.opt_angles)
         self.olap = self.overlap(self.f_state)
@@ -974,8 +967,7 @@ class QAOA:
         self.log = (f' Depth: {self.p} \n Error: {self.q_error} \n QAOA_Eg: {self.q_energy} \n'
                     f' Exact_Eg: {self.min} \n Overlap: {self.olap} \n Exe_time: {self.exe_time} \n'
                     f' Iternations: {self.opt_iter}')
-        if track_energy:
-            self.track_cost = False
+        self.track_cost = previous_tracking
 
     def run_de(self, track_energy=False):
         """Runs the QAOA using the differential evolution optimization method
@@ -1022,6 +1014,12 @@ class QAOA:
         """Runs the QAOA using Monte Carlo Tree Search (MCTS) for parameter optimization."""
         t_start = time.time()
 
+        if (not isinstance(simulations, (int, np.integer)) or simulations < 1
+                or not isinstance(b, (int, np.integer)) or b < 2):
+            raise ValueError("Expected positive simulations and at least two grid values.")
+        previous_tracking = self.track_cost
+        self.track_cost = previous_tracking or track_energy
+        best_cost, best_angles = np.inf, None
         # Initialize root node and discretized parameter space
         root = MCTSNode()
         parameter_space = np.linspace(0, np.pi, b)  # Discretized parameter values
@@ -1041,22 +1039,21 @@ class QAOA:
             remaining_params = 2 * self.p - len(node.parameters)
             complete_params = node.parameters + list(np.random.choice(parameter_space, remaining_params))
             cost = self.expectation(complete_params)
+            if cost < best_cost:
+                best_cost, best_angles = cost, np.array(complete_params).copy()
 
             # Backpropagation: Update the tree with the simulation result
             while node:
                 node.backpropagate(-cost)  # Negate cost for minimization
                 node = node.parent
 
-        # Select the best parameters from the root's children
-        best_node = max(root.children, key=lambda child: child.value / child.visits)
-        best_angles = best_node.parameters + list(np.random.choice(parameter_space, 2 * self.p - len(best_node.parameters)))
-
         t_end = time.time()
 
         # Save results
         self.opt_angles = best_angles
         self.exe_time = float(t_end - t_start)
-        self.q_energy = self.expectation(best_angles)
+        self.q_energy = best_cost
+        self.opt_iter = simulations
         self.q_error = self.q_energy - self.min
         self.f_state = self.qaoa_ansatz(best_angles)
         self.olap = self.overlap(self.f_state)
@@ -1064,8 +1061,7 @@ class QAOA:
         self.log = (f'Depth: {self.p} \n Error: {self.q_error} \n QAOA_Eg: {self.q_energy} \n'
                     f'Exact_Eg: {self.min} \n Overlap: {self.olap} \n Exe_time: {self.exe_time} \n')
 
-        if track_energy:
-            self.track_cost = False
+        self.track_cost = previous_tracking
 
 
 

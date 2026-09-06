@@ -1,29 +1,9 @@
 # Quantum Approximate Optimization Algorithm (QAOA)
 
 This repository contains a Python implementation of the Quantum Approximate Optimization Algorithm (QAOA) for solving various optimization problems. It includes functions to construct Ising Hamiltonians, k-SAT Hamiltonians, and solve the Max Cut problem. The QAOA logic can be used to find approximate solutions to these optimization problems.
-```markdown
+## Getting started
 
-
-## Getting Started
-
-These instructions will help you understand the implementation and run the provided examples.
-
-### Prerequisites
-
-- Python 3
-- NumPy
-- SciPy
-
-### Installing
-
-You can install the required dependencies using pip:
-
-pip install numpy scipy
-
-### Using
-from qaoa import *
-
-```
+Install the core dependencies with `python -m pip install numpy scipy`. From the repository root, import the implementation with `from src.qaoa import QAOA, H_zz_Ising, H_sat, plus_state`. The optional CMA-ES and PROTES backends are loaded only when their methods are called. See `requirements-test.txt` for the validation environment.
 
 ## Usage
 Detailed usage examples can be found in the examples.ipynb file.

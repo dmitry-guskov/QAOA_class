@@ -116,3 +116,101 @@ def test_natural_gradient_descent_and_singular_metric(module):
     result = flat.run_QFI(initial_params=np.zeros(4), maxiter=5, track_energy=True)
     assert result.success and result.fun == 0
     assert flat.track_cost is False
+
+
+@pytest.mark.parametrize('depth,stop', [(1,False),(3,True),(2,False)])
+def test_layerwise_selected_angles_and_total_accounting(module, depth, stop):
+    q = module.QAOA(depth, np.array([1., -1.]))
+    before = q.eval_num
+    result = q.run_heuristic_LW(True, 3, 2, stop_on_min=stop, seed=314)
+    assert q.eval_num-before == result.nfev == len(q.tracked_cost)
+    assert q.track_cost is False
+    assert result.fun < -.9999
+    np.testing.assert_allclose(result.fun, np.vdot(q.f_state, q.H*q.f_state).real, atol=1e-14)
+    np.testing.assert_allclose(result.fun, q.expectation(result.x), atol=1e-14)
+    assert len(result.x) == 2*result.depth
+    if stop:
+        assert result.depth == 1
+        assert len(q.opt_angles) == 2*q.p
+        assert abs(q.expectation(q.opt_angles)-result.fun) < 1e-13
+        continued = q.run_QFI(maxiter=0)
+        assert len(continued.x) == 2*q.p
+    repeated = module.QAOA(depth, q.H)
+    other = repeated.run_heuristic_LW(False, 3, 2, stop_on_min=stop, seed=314)
+    np.testing.assert_array_equal(result.x, other.x)
+
+
+def test_layerwise_non_hit_and_bounds(module):
+    q = module.QAOA(2, np.array([1., -1.]))
+    result = q.run_heuristic_LW(False, 1, 1, bds=[(0.,0.)]*4, seed=2)
+    assert q.lw_log is None and result.depth == 2
+    assert abs(result.fun) < 1e-14
+    np.testing.assert_array_equal(result.x, np.zeros(4))
+
+
+def test_zero_initial_angles_are_preserved(module, monkeypatch):
+    from scipy.optimize import OptimizeResult
+    q = module.QAOA(1, np.array([1., -1.]))
+    q.opt_angles = np.zeros(2)
+    def optimizer(fun, x, **kwargs):
+        np.testing.assert_array_equal(x, [0,0])
+        return OptimizeResult(x=np.asarray(x), fun=fun(x), nfev=1, nit=0)
+    monkeypatch.setattr(module, 'minimize', optimizer)
+    q.run()
+    np.testing.assert_array_equal(q.opt_angles, [0,0])
+
+
+def test_cmaes_saves_best_sample(module, monkeypatch):
+    if not hasattr(module.QAOA, 'run_cmaes'):
+        return  # qaoa_old intentionally exposes no CMA implementation.
+    import sys, types
+    samples = [np.array([np.pi/4, 3*np.pi/4]), np.zeros(2), np.array([np.pi/4,np.pi/4])]
+    class FakeCMA:
+        population_size = 3
+        def __init__(self, **kwargs): self.index=0
+        def ask(self):
+            value=samples[self.index]; self.index+=1; return value
+        def tell(self, solutions): pass
+        def should_stop(self): return False
+    monkeypatch.setitem(sys.modules, 'cmaes', types.SimpleNamespace(CMA=FakeCMA))
+    q = module.QAOA(1, np.array([1.,-1.]))
+    expected = [q.expectation(a) for a in samples]
+    q.run_cmaes(generations=1, initial_params=np.zeros(2))
+    assert q.q_energy == min(expected) and q.opt_iter == 3
+    np.testing.assert_array_equal(q.opt_angles, samples[int(np.argmin(expected))])
+    assert abs(q.expectation(q.opt_angles)-q.q_energy) < 1e-14
+
+
+def test_mcts_saves_best_evaluated_circuit(module):
+    if not hasattr(module.QAOA, 'run_mcts'):
+        return
+    q = module.QAOA(2, np.array([.1,-.7,.4,1.]))
+    np.random.seed(7)
+    q.run_mcts(track_energy=True, b=7, simulations=31)
+    assert q.q_energy == min(q.tracked_cost)
+    assert q.opt_iter == len(q.tracked_cost) == 31
+    assert q.expectation(q.opt_angles) == q.q_energy
+    assert q.track_cost is False
+
+
+def test_diagonal_validation_and_periodic_ising_convention(module):
+    for bad in [[], [1,2,3], [[1,2],[3,4]], [1,np.nan], [1,1j]]:
+        with pytest.raises(ValueError): module.QAOA(1, bad)
+    for p in [0, 1.5]:
+        with pytest.raises(ValueError): module.QAOA(p, [1,-1])
+    np.testing.assert_array_equal(module.H_zz_Ising(1), [1,1])
+    np.testing.assert_array_equal(module.H_zz_Ising(1, 'open'), [0,0])
+    np.testing.assert_array_equal(module.H_zz_Ising(2), [2,-2,-2,2])
+
+
+def test_cmaes_restores_tracking_on_backend_failure(module, monkeypatch):
+    import sys, types
+    class BrokenCMA:
+        population_size=2
+        def __init__(self, **kwargs): pass
+        def ask(self): raise RuntimeError('backend failure')
+    monkeypatch.setitem(sys.modules,'cmaes',types.SimpleNamespace(CMA=BrokenCMA))
+    q=module.QAOA(1,[1.,-1.])
+    with pytest.raises(RuntimeError):
+        q.run_cmaes(generations=1,track_energy=True,initial_params=[0.,0.],seed=1)
+    assert q.track_cost is False
