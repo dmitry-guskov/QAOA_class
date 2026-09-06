@@ -19,8 +19,6 @@ from functools import reduce
 from typing import List
 from numpy import ndarray
 
-from protes import protes_general
-from cmaes import CMA
 from scipy.optimize import differential_evolution
 from scipy.optimize import minimize
 
@@ -176,66 +174,58 @@ def fidelity(state1, state2):
     return F
 
 def create_depolarization_kraus(p_depolarization):
-    """Creates Kraus operators and probabilities for the depolarization channel.
+    """Return Pauli operators and probabilities for rho -> (1-p)rho+p I/2."""
+    p = float(p_depolarization)
+    if not 0 <= p <= 1:
+        raise ValueError("Depolarization probability must be between zero and one.")
+    return [np.eye(2), np.array([[0, 1], [1, 0]]),
+            np.array([[0, -1j], [1j, 0]]), np.diag([1, -1])], [1-3*p/4, p/4, p/4, p/4]
 
-    Args:
-        p_depolarization (float): Probability of depolarization.
-
-    Returns:
-        List[np.ndarray], List[float]: List of Kraus operators and their probabilities.
-    """
-    if not 0 <= p_depolarization <= 1:
-        raise ValueError("Depolarization probability must be between 0 and 1.")
-    kraus_ops = [
-        np.eye(2),
-        np.array([[0, 1], [1, 0]]),
-        np.array([[0, -1j], [1j, 0]]),
-        np.array([[1, 0], [0, -1]])
-    ]
-
-    probabilities = [np.sqrt(1 - 3*p_depolarization/4)] + [np.sqrt(p_depolarization) / 2] * 3
-
-    return kraus_ops, probabilities
 
 def create_amplitude_damping_kraus(p_amplitude_damping):
-    """Create Kraus operators and probabilities for the amplitude damping channel.
-    
-    Args:
-        p_amplitude_damping (float): Probability of amplitude damping.
+    """Return standard Kraus operators and None (Born-rule branch probabilities).
 
-    Returns:
-        List[np.ndarray], List[float]: List of Kraus operators and their probabilities.
+    Passing this pair to apply_ansatz_noise handles state-dependent sampling.
     """
-    if not 0 <= p_amplitude_damping <= 1:
-        raise ValueError("Depolarization probability must be between 0 and 1.")
-    kraus_ops = [
-         np.array([[1/np.sqrt(1 - p_amplitude_damping),0],[0,1]]),
-         np.array([[0,1],[0,0]])
-    ]
+    p = float(p_amplitude_damping)
+    if not 0 <= p <= 1:
+        raise ValueError("Damping probability must be between zero and one.")
+    return [np.diag([1, np.sqrt(1-p)]), np.array([[0, np.sqrt(p)], [0, 0]])], None
 
-    probabilities = [np.sqrt(1 - p_amplitude_damping), np.sqrt(p_amplitude_damping)]
-
-    return kraus_ops, probabilities
 
 def create_phase_flip_kraus(p_phase_flip):
-    """Create Kraus operators and probabilities for the phase flip channel.
-    
-    Args:
-        p_phase_flip (float): Probability of phase flip.
+    """Return I/Z operators and the actual phase-flip probabilities."""
+    p = float(p_phase_flip)
+    if not 0 <= p <= 1:
+        raise ValueError("Phase-flip probability must be between zero and one.")
+    return [np.eye(2), np.diag([1, -1])], [1-p, p]
 
-    Returns:
-        List[np.ndarray], List[float]: List of Kraus operators and their probabilities.
-    """
-    if not 0 <= p_phase_flip <= 1:
-        raise ValueError("Depolarization probability must be between 0 and 1.")
-    kraus_ops = [
-        np.eye(2),
-        np.array([[1, 0], [0, -1]])
-    ]
 
-    probabilities = [np.sqrt(1 - p_phase_flip), np.sqrt(p_phase_flip)]
+def _channel_kraus(noise_prob, kraus_ops):
+    """Convert weighted operators or standard Kraus operators to a CPTP channel."""
+    ops = np.asarray(kraus_ops, dtype=complex)
+    if ops.ndim != 3 or ops.shape[1:] != (2, 2) or len(ops) == 0 or not np.isfinite(ops).all():
+        raise ValueError("Expected a nonempty collection of finite 2x2 operators.")
+    if noise_prob is not None:
+        probabilities = np.asarray(noise_prob, dtype=float)
+        if (probabilities.shape != (len(ops),) or not np.isfinite(probabilities).all()
+                or np.any(probabilities < 0) or not np.isclose(probabilities.sum(), 1.0)):
+            raise ValueError("Noise probabilities must be nonnegative and sum to one.")
+        ops = np.sqrt(probabilities)[:, None, None] * ops
+    completeness = sum(op.conj().T @ op for op in ops)
+    if not np.allclose(completeness, np.eye(2), rtol=1e-10, atol=1e-12):
+        raise ValueError("The supplied operators do not define a trace-preserving channel.")
+    return ops
 
-    return kraus_ops, probabilities
+
+def _local_channel_trajectory(state, ops, qubit, n_qubits, rng):
+    """Apply a one-qubit channel to a normalized state; qubit zero is leftmost."""
+    tensor = np.moveaxis(state.reshape((2,) * n_qubits), qubit, 0)
+    branches = [np.moveaxis((op @ tensor.reshape(2, -1)).reshape(tensor.shape),
+                           0, qubit).reshape(-1) for op in ops]
+    probabilities = np.array([np.vdot(branch, branch).real for branch in branches])
+    index = rng.choice(len(branches), p=probabilities / probabilities.sum())
+    return branches[index] / np.sqrt(probabilities[index])
 
 
 
@@ -294,42 +284,9 @@ class QAOA:
         self.lw_log = None
 
     def mixer_list(self):
-        """Generates a list of indices for state vector swapping in the mixer.
-
-        Returns:
-           List: x_list  - List of lists of indices.
-        """             
-        def split(x, k):
-            return x.reshape((2**k, -1))
-        
-        def sym_swap(x):
-            return np.asarray([x[-1], x[-2], x[1], x[0]])
-        
-        n_qubits = self.n_qubits
-        x_list = []
-        t1 = np.asarray([np.arange(2**(n_qubits-1), 2**n_qubits), np.arange(0, 2**(n_qubits-1))])
-        t1 = t1.flatten()
-        x_list.append(t1.flatten())
-        t2 = t1.reshape(4, -1)
-        t3 = sym_swap(t2)
-        t1 = t3.flatten()
-        x_list.append(t1)
-        k = 1
-        
-        while k < (n_qubits - 1):
-            t2 = split(t1, k)
-            t2 = np.asarray(t2)
-            t1 = []
-            for y in t2:
-                t3 = y.reshape((4, -1))
-                t4 = sym_swap(t3)
-                t1.append(t4.flatten())
-            t1 = np.asarray(t1)
-            t1 = t1.flatten()
-            x_list.append(t1)
-            k += 1
-        
-        return x_list
+        """Indices for single-qubit X flips, with qubit zero most significant."""
+        indices = np.arange(2**self.n_qubits)
+        return [indices ^ (1 << (self.n_qubits-1-q)) for q in range(self.n_qubits)]
 
     def apply_gamma(self, gamma: float, statevector: ndarray) -> ndarray:
         """Applies the gamma operator to the state vector.
@@ -465,85 +422,60 @@ class QAOA:
 
         return ans
     
-    def construct_QAOA_operator_term(self,  angles: List[float], part_hamiltonian=None):
-        """
-        doesn't work yet! 
-        Construct the QAOA operator term, i.e. takes part_hamiltonian as a term of the QAOA Hamiltonian and sandwiches it with mixers and exponents of QAOA Hamiltonian. 
-        E.g. qaoao H = Z1Z2 + Z2Z3 + Z1Z3 - triangle , part_hamiltonian = Z1Z2 - term, QAOA = exp_H @ exp_X @ part_hamiltonian @ exp_X.T.conjugate() @ exp_H.T.conjugate()
+    def construct_QAOA_operator_term(self, angles: List[float], part_hamiltonian=None):
+        """Return U^dagger diag(part_hamiltonian) U in the Heisenberg picture.
 
-        Args:
-            angles (List[float]): _description_
-            part_hamiltonian: part of QAOA Hamiltonian or if the QAOA Hailtonian itself by default.
-        Returns:
-            np.ndarray: QAOA operator term.
+        qaoa_operator retains its historical row-vector convention and returns
+        U.T. A zero observable is valid and must not be replaced by self.H.
         """
-        # Define angles for mixers
-        if len(angles) % 2 != 0:
+        if len(angles) % 2:
             raise ValueError("Number of angles must be even.")
+        diagonal = self.H if part_hamiltonian is None else np.asarray(part_hamiltonian)
+        if diagonal.shape != self.H.shape:
+            raise ValueError("Expected one observable diagonal entry per basis state.")
+        row_operator = self.qaoa_operator(angles)
+        return row_operator.conj() @ np.diag(diagonal) @ row_operator.T
 
-        if part_hamiltonian is None or not part_hamiltonian.any():
-            part_hamiltonian = self.H
-        qaoa_operator = self.qaoa_operator(angles)
+    def apply_ansatz_noise(self, angles, noise_prob, kraus_ops, rng=None):
+        """Sample one normalized trajectory, with local noise after each layer.
 
-        ans = qaoa_operator @ np.diag(part_hamiltonian) @ qaoa_operator.T.conj()
-
-        return ans 
-
-    def apply_ansatz_noise(self, angles: List[float], noise_prob: List[float], kraus_ops: List[np.ndarray]) -> np.ndarray:
-        """Applies the QAOA ansatz to the state vector with noise.
-
-        Args:
-            angles (List[float]): The list of QAOA angles.
-            noise_prob (List[float]): Probability of applying noise after each layer.
-            kraus_ops (List[np.ndarray]): List of Kraus operators representing different noise channels.
-
-        Returns:
-            np.ndarray: The state vector with noise applied.
+        Angles are [gamma_1,...,gamma_p,beta_1,...,beta_p]. noise_prob=None
+        means standard Kraus operators; otherwise weights multiply operators
+        by sqrt(probability). Branches always use their state-dependent norms.
+        rng may be a NumPy Generator; by default np.random.seed is respected.
         """
+        angles = np.asarray(angles, dtype=float)
+        if angles.shape != (2*self.p,) or not np.isfinite(angles).all():
+            raise ValueError("Expected exactly 2*p finite angles.")
+        ops = _channel_kraus(noise_prob, kraus_ops)
+        rng = np.random if rng is None else rng
         state = plus_state(self.n_qubits)
-        p = self.p
-        noise_prob /= np.array(noise_prob).sum()
-
-        I = np.eye(2)
-        for i in range(p):
+        for i in range(self.p):
             state = self.apply_gamma(angles[i], state)
-            state = self.apply_beta(angles[p + i], state)
-            #TODO this step can be optimized by makeing the whole noise operator in place insted of applying 1-local operators
-            noise_inds = []
-            for q in range(self.n_qubits):
-                noise_ind = np.random.choice(len(noise_prob),size=1,p=noise_prob)[0]
-                noise_inds.append(noise_ind)                
-                # Apply noise by randomly selecting a Kraus operator
-                kraus_op = kraus_ops[noise_ind]
-                
-                # Generate Kraus operators for each qubit
-                kraus_operator_q = reduce(np.kron, [I]*q + [kraus_op] + [I]*(self.n_qubits-q-1))
-                state = np.dot(kraus_operator_q, state)
-
+            state = self.apply_beta(angles[self.p+i], state)
+            for qubit in range(self.n_qubits):
+                state = _local_channel_trajectory(state, ops, qubit, self.n_qubits, rng)
         return state
 
+    def expectation_noise(self, angles, noise_prob, kraus_ops, num_samples, return_state=False, rng=None):
+        """Average trajectory energies, never coherent trajectory amplitudes.
 
-    def expectation_noise(self, angles: List[float], noise_prob: List[float], kraus_ops: List[np.ndarray], num_samples: int, return_state=False) -> float:
-        """Calculates the average expectation value with noise.
-
-        Args:
-            angles (List[float]): The list of QAOA angles.
-            noise_prob (List[float]): Probability of applying noise after each layer.
-            kraus_ops (List[np.ndarray]): List of Kraus operators representing different noise channels.
-            num_samples (int): Number of samples to average over.
-
-        Returns:
-            float: The average expectation value with noise.
+        If return_state=True, the second result is the empirical density matrix,
+        not a statevector. Noisy output generally represents a mixed state.
         """
-        noise_prob /= np.array(noise_prob).sum()
-        noisy_state = self.apply_ansatz_noise(angles, noise_prob, kraus_ops)
-        for _ in range(num_samples-1):
-            noisy_state += self.apply_ansatz_noise(angles, noise_prob, kraus_ops)
-        total_state = noisy_state/np.linalg.norm(noisy_state)
+        if not isinstance(num_samples, (int, np.integer)) or num_samples < 1:
+            raise ValueError("num_samples must be a positive integer.")
+        energy = 0.0
+        density = np.zeros((len(self.H), len(self.H)), complex) if return_state else None
+        for _ in range(num_samples):
+            state = self.apply_ansatz_noise(angles, noise_prob, kraus_ops, rng=rng)
+            energy += np.vdot(state, self.H * state).real
+            if return_state:
+                density += np.outer(state, state.conj())
+        energy = float(energy / num_samples)
         if return_state:
-            return np.real(np.vdot(total_state, total_state * self.H)), total_state
-        # NOTE doesn't implement racking of evals 
-        return np.real(np.vdot(total_state, total_state * self.H))
+            return energy, density / num_samples
+        return energy
 
     def finite_diff_grad(self, angles: List[float], delta=1e-3) -> ndarray:
         """Computes the approximation value of the expectation functions gradient for a set of angles.
@@ -601,7 +533,7 @@ class QAOA:
         Returns:
             _type_: _description_
         """           
-        if initial_params == None:
+        if initial_params is None:
             if self.opt_angles is None or not self.opt_angles.any(): 
                 initial_angles = np.random.uniform(0, np.pi, 2*self.p)
             else: 
@@ -841,67 +773,92 @@ class QAOA:
         # If return_grad  is not True, return just the QFI_matrix
         return QFI_matrix
 
-    def run_QFI(self, track_energy=False, estimate_QFI_iter=False, initial_params=None):
-        """Runs the QAOA optimization using the Quantum Fisher Information/natural gradient descent optimization method
-            # NOTE keep track of cost or number of evals doesn't work properly due to QFI matrix calculation 
-            # TODO estimate how many evals on one call of QFI, it should depend on depth 
-        Returns:
-            _type_: _description_
-        """           
-        if initial_params == None:
-            if self.opt_angles is None or not self.opt_angles.any(): 
-                initial_angles = np.random.uniform(0, np.pi, 2*self.p)
-            else: 
-                initial_angles = self.opt_angles
-        else: 
-            initial_angles = initial_params
-        bds = [(0.0, 2 * np.pi)] * self.p + [(0.0, 2 * np.pi)] * self.p
+    def run_QFI(self, track_energy=False, estimate_QFI_iter=False, initial_params=None,
+                bds=None, *, learning_rate=1.0, regularization=1e-6,
+                maxiter=1000, gtol=1e-7, maxls=30):
+        """Damped natural-gradient descent with a feasible Armijo line search.
 
-
-        def expectation_and_grad(x):
-            qfi_matrix, grad = self.qaoa_qfi_matrix(x, plus_state(self.n_qubits), return_grad=True) 
+        F^{-1} grad(E) is a search direction, not a Euclidean derivative for
+        L-BFGS-B. QFI evaluations are recorded separately; estimate_QFI_iter
+        is retained for call compatibility and no longer fabricates cost calls.
+        """
+        from scipy.optimize import OptimizeResult
+        if (not np.isfinite([learning_rate, regularization, gtol]).all()
+                or learning_rate <= 0 or regularization <= 0 or gtol <= 0
+                or not isinstance(maxiter, (int, np.integer)) or maxiter < 0
+                or not isinstance(maxls, (int, np.integer)) or maxls < 1):
+            raise ValueError("Expected positive step/damping/tolerance and valid iteration limits.")
+        if initial_params is None:
+            initial_params = self.opt_angles
+        if initial_params is None:
+            initial_params = np.random.uniform(0, np.pi, 2*self.p)
+        x = np.asarray(initial_params, dtype=float).copy()
+        if x.shape != (2*self.p,) or not np.isfinite(x).all():
+            raise ValueError("Expected exactly 2*p finite initial parameters.")
+        if bds is None or len(bds) == 0:
+            bds = [(0.0, 2*np.pi)] * (2*self.p)
+        bounds = np.asarray(bds, dtype=float)
+        if (bounds.shape != (2*self.p, 2) or not np.isfinite(bounds).all()
+                or np.any(bounds[:, 0] > bounds[:, 1])):
+            raise ValueError("Expected one finite ordered bounds pair per parameter.")
+        x = np.clip(x, bounds[:, 0], bounds[:, 1])
+        previous_tracking = self.track_cost
+        self.track_cost = track_energy or previous_tracking
+        start = time.time()
+        nfev, njev, nit = 0, 0, 0
+        success, message = False, "Maximum iterations reached."
+        try:
             cost = self.expectation(x)
-            # estimation for QFI numbers of eval:
-            if estimate_QFI_iter and self.track_cost: 
-                self.tracked_cost += [cost]*self.p*2
-            # Compute the natural gradient
-            try:
-                natural_grad = np.linalg.inv(qfi_matrix) @ grad
-            except np.linalg.LinAlgError:
-                # If the matrix is not invertible, use the gradient instead
-                natural_grad = grad
-
-            return cost, natural_grad
-        
-        if track_energy:
-            self.track_cost = True
-        
-        t_start = time.time()
-        
-        res = minimize(
-            expectation_and_grad,
-            initial_angles,
-            method='L-BFGS-B',
-            jac=True,  # jac=True indicates that the function returns both the value and the gradient
-            bounds=bds,
-            options={'maxiter': 10000},
-        )
-        t_end = time.time()
-
-        self.opt_angles = res.x
-        self.exe_time = float(t_end - t_start)
-        self.opt_iter = res.nfev
-        self.q_energy = res.fun
-        self.q_error = self.q_energy - self.min
-        self.f_state = self.qaoa_ansatz(res.x)
+            nfev += 1
+            for _ in range(maxiter):
+                fisher, gradient = self.qaoa_qfi_matrix(x, return_grad=True)
+                njev += 1
+                projected_gradient = x - np.clip(x-gradient, bounds[:, 0], bounds[:, 1])
+                if np.linalg.norm(projected_gradient, np.inf) <= gtol:
+                    success, message = True, "Projected gradient converged."
+                    break
+                metric = (fisher + fisher.T) / 2 + regularization*np.eye(len(x))
+                direction = -np.linalg.solve(metric, gradient)
+                # At active box constraints the full metric step can point out
+                # of the domain. Use a projected gradient direction if necessary.
+                displacement = np.clip(x+learning_rate*direction, bounds[:, 0], bounds[:, 1])-x
+                if gradient @ displacement >= 0:
+                    direction = -projected_gradient
+                step = learning_rate
+                accepted = False
+                for _ in range(maxls):
+                    candidate = np.clip(x+step*direction, bounds[:, 0], bounds[:, 1])
+                    displacement = candidate-x
+                    slope = gradient @ displacement
+                    if slope < 0:
+                        candidate_cost = self.expectation(candidate)
+                        nfev += 1
+                        if candidate_cost <= cost + 1e-4*slope:
+                            x, cost = candidate, candidate_cost
+                            accepted = True
+                            nit += 1
+                            break
+                    step *= 0.5
+                if not accepted:
+                    message = "Line search could not find a decreasing feasible step."
+                    break
+        finally:
+            self.track_cost = previous_tracking
+        res = OptimizeResult(x=x, fun=cost, nit=nit, nfev=nfev, njev=njev,
+                             success=success, message=message)
+        self.optimization_result = res
+        self.qfi_evaluations = njev
+        self.opt_angles = x
+        self.exe_time = time.time()-start
+        self.opt_iter = nfev
+        self.q_energy = cost
+        self.q_error = cost-self.min
+        self.f_state = self.qaoa_ansatz(x)
         self.olap = self.overlap(self.f_state)
-
-        self.log = (f' Depth: {self.p} \n Error: {self.q_error} \n QAOA_Eg: {self.q_energy} \n'
-                    f' Exact_Eg: {self.min} \n Overlap: {self.olap} \n Exe_time: {self.exe_time} \n'
-                    f' Iterations: {self.opt_iter}')
-        
-        if track_energy:
-            self.track_cost = False
+        self.log = (f'Depth: {self.p}\nError: {self.q_error}\nQAOA_Eg: {cost}\n'
+                    f'Exact_Eg: {self.min}\nOverlap: {self.olap}\n'
+                    f'Energy evaluations: {nfev}\nQFI evaluations: {njev}\n{message}')
+        return res
             
 
 
@@ -911,6 +868,7 @@ class QAOA:
         Returns:
             _type_: _description_
         """           
+        from protes import protes_general
 
         # a = 0        # Grid lower bound
         # b = 2 * np.pi        # Grid upper bound
@@ -959,6 +917,7 @@ class QAOA:
         Returns:
             _type_: _description_
         """      
+        from cmaes import CMA
         # mean: ndarray,
         # sigma: float,
         # bounds: ndarray | None = None,
@@ -967,7 +926,7 @@ class QAOA:
         # population_size: int | None = None,
         # cov: ndarray | None = None,
         # lr_adapt: bool = False
-        if initial_params == None:
+        if initial_params is None:
             if self.opt_angles is None or not self.opt_angles.any(): 
                 initial_angles = np.random.uniform(0, np.pi, 2*self.p)
             else: 

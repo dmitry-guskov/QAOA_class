@@ -106,3 +106,7 @@ This project is licensed under the MIT License.
   
   Dmitry Guskov, MSc student: dmitry.guskov@deepquantum.ai
 © 2023 Deep Quantum Lab. All rights reserved.
+
+## Research validation
+
+See [RESEARCH_VALIDATION.md](RESEARCH_VALIDATION.md) for corrected conventions, API migration notes, limits of historical results, and reproducible regression commands.
