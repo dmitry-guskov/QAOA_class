@@ -1,0 +1,4 @@
+# Tested with Python 3.13.7; optional optimizers are not required.
+numpy==2.5.3
+scipy==1.18.1
+pytest==9.1.1
